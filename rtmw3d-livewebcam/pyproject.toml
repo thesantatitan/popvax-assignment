@@ -5,7 +5,14 @@ description = "Live webcam RTMW3D whole-body pose demo"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 dependencies = [
+    "fastapi>=0.115,<1",
     "rtmlib==0.0.15",
+    "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "onnxruntime-gpu==1.26.0; sys_platform == 'linux' and python_version >= '3.11'",
 ]
 
 [tool.uv]

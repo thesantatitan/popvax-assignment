@@ -48,3 +48,33 @@ uv run python demo.py --source ./sample.mp4 --max-frames 300
 The default backend is ONNX Runtime and the default RTMW3D configuration is
 the balanced configuration from `rtmlib`. Use `python demo.py --help` for all
 options.
+
+## Remote WSL mode
+
+The browser mode keeps the camera and display on the Mac while running the
+RTMW3D model on WSL. The browser sends compressed camera frames through an SSH
+tunnel; WSL returns annotated frames and inference stats.
+
+On the WSL machine, in the deployed demo directory:
+
+```bash
+cd /home/dev/popvax-assignment/rtmw3d-livewebcam
+uv sync --extra gpu
+./run_wsl_server.sh
+```
+
+From a second terminal on the Mac, keep the tunnel open:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 windows-cuda-wsl
+```
+
+Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) on the Mac and click
+**Start camera**. Allow camera access when the browser asks. The server checks
+whether the CUDA execution provider is available and falls back to CPU with a
+clear log message if the WSL environment only has CPU ONNX Runtime installed.
+
+The `gpu` extra is Linux-only and installs the CUDA 12-compatible
+`onnxruntime-gpu` 1.26 series for the WSL machine. `run_wsl_server.sh` also
+exposes the CUDA/cuDNN libraries already present in the WSL PyTorch environment
+to the demo; the regular Mac environment continues to use CPU ONNX Runtime.
