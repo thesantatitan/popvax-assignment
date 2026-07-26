@@ -7,6 +7,7 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +16,18 @@ import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from rtmlib import PoseTracker, Wholebody3d, draw_skeleton
+from rtmlib import Custom, PoseTracker, Wholebody3d, draw_skeleton
 
 from demo import as_arrays, draw_3d_inset
+from roi_tracker import PersistentRoiPoseTracker
 
 
 ROOT = Path(__file__).resolve().parent
 WEB_INDEX = ROOT / "web" / "index.html"
+YOLOX_NANO_URL = (
+    "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/"
+    "onnx_sdk/yolox_nano_8xb8-300e_humanart-40f6f0d0.zip"
+)
 
 
 def _requested_device() -> str:
@@ -38,19 +44,43 @@ def _requested_device() -> str:
 def _make_tracker() -> tuple[PoseTracker, str, str]:
     device = _requested_device()
     backend = os.getenv("RTMW3D_BACKEND", "onnxruntime").strip().lower()
-    det_frequency = int(os.getenv("RTMW3D_DET_FREQUENCY", "7"))
+    det_frequency = int(os.getenv("RTMW3D_DET_FREQUENCY", "10"))
+    detector = os.getenv("RTMW3D_DETECTOR", "yolox_nano").strip().lower()
+    redetect_confidence = float(
+        os.getenv("RTMW3D_REDETECT_CONFIDENCE", "0.35")
+    )
+    boundary_fraction = float(os.getenv("RTMW3D_BOUNDARY_FRACTION", "0.08"))
     print(
-        f"Loading RTMW3D on {device} with {backend}; "
+        f"Loading RTMW3D on {device} with {backend}, detector={detector}, "
+        f"det_frequency={det_frequency}; "
         "the first run may download model files..."
     )
-    tracker = PoseTracker(
-        Wholebody3d,
+    if detector == "yolox_nano":
+        solution = partial(
+            Custom,
+            det_class="YOLOX",
+            det=YOLOX_NANO_URL,
+            det_input_size=(416, 416),
+            pose_class="RTMPose3d",
+            pose=Wholebody3d.MODE["balanced"]["pose"],
+            pose_input_size=(288, 384),
+        )
+    elif detector in {"yolox_m", "default"}:
+        solution = Wholebody3d
+    else:
+        raise ValueError(
+            f"Unsupported RTMW3D_DETECTOR={detector!r}; use yolox_nano or yolox_m"
+        )
+    tracker = PersistentRoiPoseTracker(
+        solution,
         det_frequency=det_frequency,
         tracking=False,
         mode="balanced",
         to_openpose=False,
         backend=backend,
         device=device,
+        redetect_confidence=redetect_confidence,
+        boundary_fraction=boundary_fraction,
     )
     return tracker, device, backend
 

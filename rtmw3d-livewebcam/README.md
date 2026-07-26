@@ -53,7 +53,10 @@ options.
 
 The browser mode keeps the camera and display on the Mac while running the
 RTMW3D model on WSL. The browser sends compressed camera frames through an SSH
-tunnel; WSL returns annotated frames and inference stats.
+tunnel; WSL returns annotated frames and inference stats. The default WSL
+configuration uses the official YOLOX-Nano person detector at 416x416, runs it
+every 10 frames, and re-detects early when body confidence drops or the
+pose-derived ROI approaches its previous crop boundary.
 
 On the WSL machine, in the deployed demo directory:
 
@@ -78,3 +81,7 @@ The `gpu` extra is Linux-only and installs the CUDA 12-compatible
 `onnxruntime-gpu` 1.26 series for the WSL machine. `run_wsl_server.sh` also
 exposes the CUDA/cuDNN libraries already present in the WSL PyTorch environment
 to the demo; the regular Mac environment continues to use CPU ONNX Runtime.
+
+To compare against the original detector, start the server with
+`RTMW3D_DETECTOR=yolox_m RTMW3D_DET_FREQUENCY=7`. The pose model remains the
+same RTMW3D checkpoint in both configurations.
