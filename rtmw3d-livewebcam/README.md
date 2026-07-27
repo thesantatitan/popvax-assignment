@@ -85,3 +85,18 @@ to the demo; the regular Mac environment continues to use CPU ONNX Runtime.
 To compare against the original detector, start the server with
 `RTMW3D_DETECTOR=yolox_m RTMW3D_DET_FREQUENCY=7`. The pose model remains the
 same RTMW3D checkpoint in both configurations.
+
+## Pose-only WSL benchmark
+
+To separate pose execution from detector, camera, and browser costs, run the
+fixed-input benchmark on WSL:
+
+```bash
+uv run python pose_runtime_benchmark.py \
+  --model /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx \
+  --warmup 50 --iterations 500
+```
+
+It reports ordinary `session.run`, host/device copies, I/O Binding execution,
+decoding, GPU utilization, and optional ORT CUDA operator profiling. Add
+`--cuda-graph` to measure the static I/O Binding CUDA Graph path.
