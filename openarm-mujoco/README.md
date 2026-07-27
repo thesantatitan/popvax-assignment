@@ -43,6 +43,27 @@ uv run python launch.py
 The MuJoCo viewer should show the complete bimanual OpenArm. To inspect collision
 geometry, enable the collision/convex-hull rendering groups in the viewer.
 
+## Headless browser stream
+
+WSLg is not required. MuJoCo can render through EGL on the WSL GPU and stream
+JPEG frames to a normal Windows browser:
+
+```bash
+cd /home/dev/popvax-assignment/openarm-mujoco
+MUJOCO_GL=egl uv run python headless_server.py --demo-motion
+```
+
+Open <http://localhost:8080> on Windows. The optional demo motion is generated
+with actuator torques and physics stepping; omit `--demo-motion` for a stationary
+scene ready to be connected to the retargeting controller.
+
+Useful options:
+
+```bash
+uv run python headless_server.py --help
+uv run python headless_server.py --width 1280 --height 720 --fps 30
+```
+
 ## Re-run validation
 
 ```bash
