@@ -215,7 +215,10 @@ def draw_3d_inset(
     center_xy = np.array([x0 + inset // 2, y0 + inset // 2 + 12])
     projected = np.empty((17, 2), dtype=np.int32)
     projected[:, 0] = center_xy[0] + (points[:, 0] - 0.35 * points[:, 2]) * inset * 0.42
-    projected[:, 1] = center_xy[1] - (points[:, 1] + 0.15 * points[:, 2]) * inset * 0.42
+    # RTMW3D's x/y output follows image coordinates: positive y points down.
+    # Keep that convention when projecting into the OpenCV inset; subtracting
+    # y here would put the head below the feet.
+    projected[:, 1] = center_xy[1] + (points[:, 1] + 0.15 * points[:, 2]) * inset * 0.42
 
     for start, end in BODY_EDGES:
         if visible[start] and visible[end]:
