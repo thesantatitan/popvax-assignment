@@ -37,6 +37,8 @@ h1{font-size:20px;margin:14px}img{max-width:100vw;max-height:calc(100vh - 60px)}
 class Simulation:
     def __init__(self, width: int, height: int, fps: float, demo_motion: bool) -> None:
         self.model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
+        self.model.vis.global_.offwidth = width
+        self.model.vis.global_.offheight = height
         self.data = mujoco.MjData(self.model)
         self.width = width
         self.height = height
