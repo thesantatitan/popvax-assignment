@@ -31,6 +31,15 @@ cd /home/dev/popvax-assignment/openarm-mujoco
 uv run python launch.py
 ```
 
+When launching through SSH, provide the WSLg variables explicitly:
+
+```bash
+DISPLAY=:0 \
+WAYLAND_DISPLAY=wayland-0 \
+XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir \
+uv run python launch.py
+```
+
 The MuJoCo viewer should show the complete bimanual OpenArm. To inspect collision
 geometry, enable the collision/convex-hull rendering groups in the viewer.
 
