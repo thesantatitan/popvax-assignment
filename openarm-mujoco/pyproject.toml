@@ -1,0 +1,10 @@
+[project]
+name = "popvax-openarm-mujoco"
+version = "0.1.0"
+description = "Pinned MuJoCo environment for the PopVax bimanual retargeting assessment"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mujoco==3.6.0",
+    "numpy==2.3.5",
+]
+
