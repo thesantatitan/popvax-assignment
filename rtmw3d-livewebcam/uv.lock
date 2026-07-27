@@ -375,6 +375,48 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-cublas-cu12"
+version = "12.9.2.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "python_full_version == '3.11.*'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/a2/c96163a0fff1839c0c9548bbdeae7b853b867009e33b9b9264adc238b1cf/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:5572131a59c3eebeeb1c4c8144f772d49372c20124916e072a0e3fc30df421d5", size = 575012079, upload-time = "2026-04-08T18:51:47.303Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/c0/0a517bfe63ccd3b92eb254d264e28fca3c7cab75d07daea315250fb1bf73/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:e4f53a8ca8c5d6e8c492d0d0a3d565ecb59a751b19cfdaa4f6da0ab2104c1702", size = 581240110, upload-time = "2026-04-08T18:52:31.532Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-nvrtc-cu12"
+version = "12.9.86"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/85/e4af82cc9202023862090bfca4ea827d533329e925c758f0cde964cb54b7/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:210cf05005a447e29214e9ce50851e83fc5f4358df8b453155d5e1918094dcb4", size = 89568129, upload-time = "2025-06-05T20:02:41.973Z" },
+    { url = "https://files.pythonhosted.org/packages/64/eb/c2295044b8f3b3b08860e2f6a912b702fc92568a167259df5dddb78f325e/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:096d4de6bda726415dfaf3198d4f5c522b8e70139c97feef5cd2ca6d4cd9cead", size = 44528905, upload-time = "2025-06-05T20:02:29.754Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-runtime-cu12"
+version = "12.9.79"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/e0/0279bd94539fda525e0c8538db29b72a5a8495b0c12173113471d28bce78/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:83469a846206f2a733db0c42e223589ab62fd2fabac4432d2f8802de4bded0a4", size = 3515012, upload-time = "2025-06-05T20:00:35.519Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/46/a92db19b8309581092a3add7e6fceb4c301a3fd233969856a8cbf042cd3c/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:25bba2dfb01d48a9b59ca474a1ac43c6ebf7011f1b0b8cc44f54eb6ac48a96c3", size = 3493179, upload-time = "2025-06-05T20:00:53.735Z" },
+]
+
+[[package]]
+name = "nvidia-cudnn-cu12"
+version = "8.9.7.29"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nvidia-cublas-cu12", marker = "python_full_version == '3.11.*'" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "python_full_version == '3.11.*'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/fb/8071b1c82db9b38dccbd11dfaa16aaa4b239d2deff5af711d8b01467554f/nvidia_cudnn_cu12-8.9.7.29-py3-none-manylinux1_x86_64.whl", hash = "sha256:adf4f59ed7a1341103822ed8df6e144f4d47ea8b10d9bf0ea0047ba738fd7b02", size = 704741186, upload-time = "2023-12-05T20:38:08.35Z" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.24.3"
 source = { registry = "https://pypi.org/simple" }
@@ -780,15 +822,23 @@ dependencies = [
 gpu = [
     { name = "onnxruntime-gpu", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
 ]
+tensorrt = [
+    { name = "nvidia-cudnn-cu12", marker = "python_full_version == '3.11.*' and sys_platform == 'linux'" },
+    { name = "tensorrt-bindings", marker = "python_full_version == '3.11.*' and sys_platform == 'linux'" },
+    { name = "tensorrt-libs", marker = "python_full_version == '3.11.*' and sys_platform == 'linux'" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "nvidia-cudnn-cu12", marker = "python_full_version == '3.11.*' and sys_platform == 'linux' and extra == 'tensorrt'", specifier = "==8.9.7.29" },
     { name = "onnxruntime-gpu", marker = "python_full_version >= '3.11' and sys_platform == 'linux' and extra == 'gpu'", specifier = "==1.26.0" },
     { name = "rtmlib", specifier = "==0.0.15" },
+    { name = "tensorrt-bindings", marker = "python_full_version == '3.11.*' and sys_platform == 'linux' and extra == 'tensorrt'", specifier = "==8.6.1", index = "https://pypi.nvidia.com/" },
+    { name = "tensorrt-libs", marker = "python_full_version == '3.11.*' and sys_platform == 'linux' and extra == 'tensorrt'", specifier = "==8.6.1", index = "https://pypi.nvidia.com/" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
-provides-extras = ["gpu"]
+provides-extras = ["gpu", "tensorrt"]
 
 [[package]]
 name = "starlette"
@@ -813,6 +863,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
+]
+
+[[package]]
+name = "tensorrt-bindings"
+version = "8.6.1"
+source = { registry = "https://pypi.nvidia.com/" }
+wheels = [
+    { url = "https://pypi.nvidia.com/tensorrt-bindings/tensorrt_bindings-8.6.1-cp310-none-manylinux_2_17_x86_64.whl", hash = "sha256:6f9d26d5d8f6b87d62048c5ef4bb33b179cdf944d1b28480458d8c27d1e65456" },
+    { url = "https://pypi.nvidia.com/tensorrt-bindings/tensorrt_bindings-8.6.1-cp311-none-manylinux_2_17_x86_64.whl", hash = "sha256:705cfab5c60f0bed7d939559d880165a761bd9ac0f4203004948a760eef99838" },
+]
+
+[[package]]
+name = "tensorrt-libs"
+version = "8.6.1"
+source = { registry = "https://pypi.nvidia.com/" }
+dependencies = [
+    { name = "nvidia-cublas-cu12", marker = "python_full_version == '3.11.*'" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "python_full_version == '3.11.*'" },
+    { name = "nvidia-cudnn-cu12", marker = "python_full_version == '3.11.*'" },
+]
+wheels = [
+    { url = "https://pypi.nvidia.com/tensorrt-libs/tensorrt_libs-8.6.1-py2.py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:b8445cdba68d108345c95a65167c2bb6e03cb3e6cd6cb51e86f1028151d5a93e" },
 ]
 
 [[package]]

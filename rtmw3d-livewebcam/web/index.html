@@ -91,6 +91,7 @@
         <span>WSL FPS <strong id="fps">—</strong></span>
         <span>Inference <strong id="latency">—</strong></span>
         <span>Device <strong id="device">—</strong></span>
+        <span>Model <strong id="model">—</strong></span>
       </section>
 
       <p class="note">The page is served through the SSH tunnel. Camera permission stays on the Mac; image inference stays on the WSL machine.</p>
@@ -121,6 +122,7 @@
         document.getElementById("fps").textContent = stats.fps == null ? "—" : `${stats.fps}`;
         document.getElementById("latency").textContent = stats.processing_ms == null ? "—" : `${stats.processing_ms} ms`;
         document.getElementById("device").textContent = stats.device ?? "—";
+        document.getElementById("model").textContent = stats.model ?? stats.backend ?? "—";
       }
 
       function stop() {

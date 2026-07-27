@@ -62,7 +62,7 @@ On the WSL machine, in the deployed demo directory:
 
 ```bash
 cd /home/dev/popvax-assignment/rtmw3d-livewebcam
-uv sync --extra gpu
+uv sync --extra gpu --extra tensorrt
 ./run_wsl_server.sh
 ```
 
@@ -77,10 +77,19 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) on the Mac and click
 whether the CUDA execution provider is available and falls back to CPU with a
 clear log message if the WSL environment only has CPU ONNX Runtime installed.
 
-The `gpu` extra is Linux-only and installs the CUDA 12-compatible
-`onnxruntime-gpu` 1.26 series for the WSL machine. `run_wsl_server.sh` also
-exposes the CUDA/cuDNN libraries already present in the WSL PyTorch environment
-to the demo; the regular Mac environment continues to use CPU ONNX Runtime.
+The WSL live server defaults to RTMW3D-L with the validated TensorRT 8.6 FP32
+engine at `/home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan`. The
+YOLOX-Nano detector still uses CUDA ONNX Runtime and runs every 10 frames. The
+`gpu` extra installs the CUDA 12-compatible `onnxruntime-gpu` 1.26 series;
+the `tensorrt` extra installs TensorRT 8.6.1 and cuDNN 8.9 in the uv-managed
+WSL environment. `run_wsl_server.sh` exposes both TensorRT and CUDA libraries
+without changing the regular Mac environment.
+
+To temporarily compare the original ORT RTMW3D-X server, use:
+
+```bash
+RTMW3D_BACKEND=onnxruntime ./run_wsl_server.sh
+```
 
 To compare against the original detector, start the server with
 `RTMW3D_DETECTOR=yolox_m RTMW3D_DET_FREQUENCY=7`. The pose model remains the

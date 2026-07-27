@@ -20,6 +20,7 @@ from rtmlib import Custom, PoseTracker, Wholebody3d, draw_skeleton
 
 from demo import as_arrays, draw_3d_inset
 from roi_tracker import PersistentRoiPoseTracker
+from tensorrt_backend import TensorRTWholebody3d
 
 
 ROOT = Path(__file__).resolve().parent
@@ -43,9 +44,13 @@ def _requested_device() -> str:
 
 def _make_tracker() -> tuple[PoseTracker, str, str]:
     device = _requested_device()
-    backend = os.getenv("RTMW3D_BACKEND", "onnxruntime").strip().lower()
+    backend = os.getenv("RTMW3D_BACKEND", "tensorrt").strip().lower()
     det_frequency = int(os.getenv("RTMW3D_DET_FREQUENCY", "10"))
     detector = os.getenv("RTMW3D_DETECTOR", "yolox_nano").strip().lower()
+    trt_engine = os.getenv(
+        "RTMW3D_TRT_ENGINE",
+        "/home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan",
+    )
     redetect_confidence = float(
         os.getenv("RTMW3D_REDETECT_CONFIDENCE", "0.35")
     )
@@ -56,20 +61,39 @@ def _make_tracker() -> tuple[PoseTracker, str, str]:
         "the first run may download model files..."
     )
     if detector == "yolox_nano":
+        detector_model = YOLOX_NANO_URL
+        detector_input_size = (416, 416)
         solution = partial(
             Custom,
             det_class="YOLOX",
-            det=YOLOX_NANO_URL,
-            det_input_size=(416, 416),
+            det=detector_model,
+            det_input_size=detector_input_size,
             pose_class="RTMPose3d",
             pose=Wholebody3d.MODE["balanced"]["pose"],
             pose_input_size=(288, 384),
         )
     elif detector in {"yolox_m", "default"}:
+        detector_model = Wholebody3d.MODE["balanced"]["det"]
+        detector_input_size = Wholebody3d.MODE["balanced"]["det_input_size"]
         solution = Wholebody3d
     else:
         raise ValueError(
             f"Unsupported RTMW3D_DETECTOR={detector!r}; use yolox_nano or yolox_m"
+        )
+
+    if backend == "tensorrt":
+        if device != "cuda":
+            raise ValueError("RTMW3D_BACKEND=tensorrt requires RTMW3D_DEVICE=cuda")
+        if not Path(trt_engine).expanduser().is_file():
+            raise FileNotFoundError(
+                f"RTMW3D TensorRT engine does not exist: {trt_engine}"
+            )
+        solution = partial(
+            TensorRTWholebody3d,
+            det=detector_model,
+            det_input_size=detector_input_size,
+            pose=trt_engine,
+            pose_input_size=(288, 384),
         )
     tracker = PersistentRoiPoseTracker(
         solution,
@@ -90,6 +114,11 @@ class InferenceService:
 
     def __init__(self) -> None:
         self.tracker, self.device, self.backend = _make_tracker()
+        self.model_label = (
+            "RTMW3D-L + TensorRT 8.6 FP32"
+            if self.backend == "tensorrt"
+            else "RTMW3D-X + ONNX Runtime"
+        )
         self.lock = asyncio.Lock()
         self.frame_index = 0
         self.fps = 0.0
@@ -122,10 +151,10 @@ class InferenceService:
         self.frame_index += 1
         processing_ms = (time.perf_counter() - started) * 1000.0
 
-        cv2.rectangle(rendered, (0, 0), (min(rendered.shape[1], 520), 44), (18, 22, 28), -1)
+        cv2.rectangle(rendered, (0, 0), (min(rendered.shape[1], 640), 44), (18, 22, 28), -1)
         cv2.putText(
             rendered,
-            f"RTMW3D on WSL | {self.device} | people: {people} | FPS: {self.fps:4.1f}",
+            f"{self.model_label} | {self.device} | people: {people} | FPS: {self.fps:4.1f}",
             (12, 28),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.57,
@@ -159,6 +188,7 @@ class InferenceService:
             "processing_ms": round(processing_ms, 1),
             "device": self.device,
             "backend": self.backend,
+            "model": self.model_label,
         }
         return output.tobytes(), stats
 
