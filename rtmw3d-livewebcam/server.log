@@ -1,0 +1,120 @@
+INFO:     Started server process [11784]
+INFO:     Waiting for application startup.
+[0;93m2026-07-26 23:57:15.613093160 [W:onnxruntime:, session_state.cc:1367 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-07-26 23:57:15.613141360 [W:onnxruntime:, session_state.cc:1369 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Loading RTMW3D on cuda with onnxruntime, detector=yolox_nano, det_frequency=10; the first run may download model files...
+load /home/dev/.cache/rtmlib/hub/checkpoints/yolox_nano_8xb8-300e_humanart-40f6f0d0.onnx with onnxruntime backend
+load /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx with onnxruntime backend
+INFO:     127.0.0.1:46248 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46254 - "GET / HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [11784]
+INFO:     Started server process [17202]
+INFO:     Waiting for application startup.
+[0;93m2026-07-27 00:25:17.800162788 [W:onnxruntime:, session_state.cc:1367 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-07-27 00:25:17.800220488 [W:onnxruntime:, session_state.cc:1369 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Loading RTMW3D on cuda with onnxruntime, detector=yolox_nano, det_frequency=10; the first run may download model files...
+load /home/dev/.cache/rtmlib/hub/checkpoints/yolox_nano_8xb8-300e_humanart-40f6f0d0.onnx with onnxruntime backend
+load /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-x_8xb64_cocktail14-384x288-b0a0eab7_20240626.onnx with onnxruntime backend
+INFO:     127.0.0.1:59800 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59812 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44958 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44966 - "GET / HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [17202]
+INFO:     Started server process [19868]
+INFO:     Waiting for application startup.
+[0;93m2026-07-27 10:05:01.618538356 [W:onnxruntime:, session_state.cc:1367 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-07-27 10:05:01.618593356 [W:onnxruntime:, session_state.cc:1369 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Loading RTMW3D on cuda with tensorrt, detector=yolox_nano, det_frequency=10; the first run may download model files...
+load /home/dev/.cache/rtmlib/hub/checkpoints/yolox_nano_8xb8-300e_humanart-40f6f0d0.onnx with onnxruntime backend
+load /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan with TensorRT 8.6 FP32 backend
+INFO:     127.0.0.1:46472 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40492 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:52582 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [19868]
+INFO:     Started server process [20294]
+INFO:     Waiting for application startup.
+[0;93m2026-07-27 10:07:05.598417685 [W:onnxruntime:, session_state.cc:1367 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-07-27 10:07:05.598481585 [W:onnxruntime:, session_state.cc:1369 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Loading RTMW3D on cuda with tensorrt, detector=yolox_nano, det_frequency=10; the first run may download model files...
+load /home/dev/.cache/rtmlib/hub/checkpoints/yolox_nano_8xb8-300e_humanart-40f6f0d0.onnx with onnxruntime backend
+load /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan with TensorRT 8.6 FP32 backend
+INFO:     127.0.0.1:46000 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50994 - "WebSocket /ws" [accepted]
+INFO:     connection open
+Browser disconnected
+INFO:     127.0.0.1:51006 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35646 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57074 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38482 - "WebSocket /ws" [accepted]
+INFO:     connection open
+Browser disconnected
+INFO:     127.0.0.1:55582 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34982 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32934 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34636 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40542 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58902 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50580 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57758 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44910 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44912 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41086 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59770 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46574 - "WebSocket /ws" [accepted]
+INFO:     connection open
+Browser disconnected
+INFO:     127.0.0.1:46856 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46868 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:39618 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     Started server process [21588]
+INFO:     Waiting for application startup.
+[0;93m2026-07-27 10:31:47.620808415 [W:onnxruntime:, session_state.cc:1367 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-07-27 10:31:47.620865715 [W:onnxruntime:, session_state.cc:1369 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+Browser disconnected
+Browser disconnected
+INFO:     127.0.0.1:36968 - "GET / HTTP/1.1" 200 OK
+INFO:     Application startup complete.
+ERROR:    [Errno 98] error while attempting to bind on address ('127.0.0.1', 8000): address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+Loading RTMW3D on cuda with tensorrt, detector=yolox_nano, det_frequency=10; the first run may download model files...
+load /home/dev/.cache/rtmlib/hub/checkpoints/yolox_nano_8xb8-300e_humanart-40f6f0d0.onnx with onnxruntime backend
+load /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan with TensorRT 8.6 FP32 backend
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [20294]
+INFO:     Started server process [21778]
+INFO:     Waiting for application startup.
+[0;93m2026-07-27 10:32:40.728413546 [W:onnxruntime:, session_state.cc:1367 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance. e.g. ORT explicitly assigns shape related ops to CPU to improve perf.[m
+[0;93m2026-07-27 10:32:40.728485047 [W:onnxruntime:, session_state.cc:1369 VerifyEachNodeIsAssignedToAnEp] Rerunning with verbose output on a non-minimal build will show node assignments.[m
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Loading RTMW3D on cuda with tensorrt, detector=yolox_nano, det_frequency=10; the first run may download model files...
+load /home/dev/.cache/rtmlib/hub/checkpoints/yolox_nano_8xb8-300e_humanart-40f6f0d0.onnx with onnxruntime backend
+load /home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan with TensorRT 8.6 FP32 backend
+INFO:     127.0.0.1:37506 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34174 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36258 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36266 - "GET / HTTP/1.1" 200 OK

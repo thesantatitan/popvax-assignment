@@ -1,4 +1,4 @@
-"""Measure an RTMW3D ONNX Runtime CUDA graph and its I/O paths.
+"""Measure RTMW3D-X ONNX Runtime CUDA lower bounds and I/O paths.
 
 This benchmark deliberately bypasses detection, cropping, visualization, and
 the live server. It runs a fixed preprocessed 1x3x384x288 tensor so runtime

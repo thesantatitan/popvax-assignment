@@ -16,7 +16,7 @@ if [[ -d "$cuda_site_packages/nvidia" ]]; then
         else
             cuda_libs="$cuda_libs:$lib_dir"
         fi
-    done < <(find "$cuda_site_packages/nvidia" -mindepth 2 -maxdepth 2 -type d -name lib -print)
+done < <(find "$cuda_site_packages/nvidia" -mindepth 2 -maxdepth 2 -type d -name lib -print)
 fi
 
 # TensorRT 8.6 uses cuDNN 8 while the PyTorch environment may also contain
