@@ -123,29 +123,45 @@ class Simulation:
 
     def run(self) -> None:
         render_period = 1.0 / self.fps
-        next_render = time.monotonic()
-        start = next_render
+        wall_start = time.monotonic()
+        next_render = wall_start
         camera = mujoco.MjvCamera()
         mujoco.mjv_defaultFreeCamera(self.model, camera)
         with mujoco.Renderer(self.model, height=self.height, width=self.width) as renderer:
             while self.running:
                 now = time.monotonic()
-                if self.demo_motion:
-                    phase = now - start
-                    wave = self.demo_amplitude * np.sin(phase * 0.7 + self.demo_phase)
-                    desired = self.demo_center.copy()
-                    desired[:7] += wave
-                    desired[7:] += wave * np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
-                    limits = self.model.jnt_range[self.joint_ids]
-                    desired = np.clip(desired, limits[:, 0] + 0.02, limits[:, 1] - 0.02)
-                    qpos = self.data.qpos[self.qpos_addresses]
-                    qvel = self.data.qvel[self.dof_addresses]
-                    gravity_and_bias = self.data.qfrc_bias[self.dof_addresses]
-                    torque = self.kp * (desired - qpos) - self.kd * qvel + gravity_and_bias
-                    force_limits = self.model.actuator_forcerange[self.actuator_ids]
-                    torque = np.clip(torque, force_limits[:, 0], force_limits[:, 1])
-                    self.data.ctrl[self.actuator_ids] = torque
-                mujoco.mj_step(self.model, self.data)
+                target_simulation_time = now - wall_start
+                while self.data.time < target_simulation_time:
+                    if self.demo_motion:
+                        phase = self.data.time
+                        wave = self.demo_amplitude * np.sin(
+                            phase * 0.7 + self.demo_phase
+                        )
+                        desired = self.demo_center.copy()
+                        desired[:7] += wave
+                        desired[7:] += wave * np.array(
+                            [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+                        )
+                        limits = self.model.jnt_range[self.joint_ids]
+                        desired = np.clip(
+                            desired, limits[:, 0] + 0.02, limits[:, 1] - 0.02
+                        )
+                        qpos = self.data.qpos[self.qpos_addresses]
+                        qvel = self.data.qvel[self.dof_addresses]
+                        gravity_and_bias = self.data.qfrc_bias[self.dof_addresses]
+                        torque = (
+                            self.kp * (desired - qpos)
+                            - self.kd * qvel
+                            + gravity_and_bias
+                        )
+                        force_limits = self.model.actuator_forcerange[
+                            self.actuator_ids
+                        ]
+                        torque = np.clip(
+                            torque, force_limits[:, 0], force_limits[:, 1]
+                        )
+                        self.data.ctrl[self.actuator_ids] = torque
+                    mujoco.mj_step(self.model, self.data)
 
                 if now >= next_render:
                     with self.camera_lock:
@@ -176,7 +192,9 @@ class Simulation:
                         self.frame = output.getvalue()
                         self.frame_number += 1
                         self.condition.notify_all()
-                    next_render = now + render_period
+                    next_render += render_period
+                    if next_render <= now:
+                        next_render = now + render_period
                 else:
                     time.sleep(min(0.001, next_render - now))
 
