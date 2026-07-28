@@ -35,10 +35,11 @@ header{height:42px;display:flex;align-items:center;gap:16px;padding:0 14px;backg
 h1{font-size:16px;margin:0}button{margin-left:auto;padding:5px 12px;cursor:pointer}
 #viewport{height:calc(100% - 42px);display:grid;place-items:center}
 img{display:block;max-width:100%;max-height:100%;user-select:none;cursor:grab}
-img.dragging{cursor:grabbing}.help{color:#aaa}
+img.dragging{cursor:grabbing}.help{color:#aaa}#state{font:12px ui-monospace;color:#8fd}
 </style></head><body>
 <header><h1>OpenArm bimanual - headless MuJoCo/EGL</h1>
 <span class="help">Left drag: orbit | Right drag: pan | Wheel: zoom | Double-click: reset</span>
+<span id="state">Loading state...</span>
 <button id="reset">Reset camera</button></header>
 <div id="viewport"><img id="stream" src="/stream.mjpg" draggable="false" alt="MuJoCo stream"></div>
 <script>
@@ -75,6 +76,14 @@ image.addEventListener("wheel",event=>{
 },{passive:false});
 image.addEventListener("dblclick",()=>camera("reset"));
 document.getElementById("reset").addEventListener("click",()=>camera("reset"));
+async function updateState(){
+  try{
+    const state=await fetch("/state.json",{cache:"no-store"}).then(response=>response.json());
+    document.getElementById("state").textContent=
+      `t=${state.time.toFixed(1)}s | joint motion=${state.motion.toFixed(3)} rad`;
+  }catch(_){}
+}
+setInterval(updateState,500);updateState();
 </script></body></html>"""
 
 
@@ -102,6 +111,15 @@ class Simulation:
                 for name in ARM_ACTUATORS
             ]
         )
+        self.joint_ids = self.model.actuator_trnid[self.actuator_ids, 0]
+        self.qpos_addresses = self.model.jnt_qposadr[self.joint_ids]
+        self.dof_addresses = self.model.jnt_dofadr[self.joint_ids]
+        self.initial_arm_qpos = self.data.qpos[self.qpos_addresses].copy()
+        self.kp = np.tile(np.array([18.0, 18.0, 12.0, 12.0, 5.0, 5.0, 5.0]), 2)
+        self.kd = np.tile(np.array([2.0, 2.0, 1.5, 1.5, 0.7, 0.7, 0.7]), 2)
+        self.demo_center = np.tile(np.array([0.5, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]), 2)
+        self.demo_amplitude = np.array([0.35, 0.25, 0.30, 0.40, 0.25, 0.20, 0.25])
+        self.demo_phase = np.arange(7) * 0.55
 
     def run(self) -> None:
         render_period = 1.0 / self.fps
@@ -114,9 +132,19 @@ class Simulation:
                 now = time.monotonic()
                 if self.demo_motion:
                     phase = now - start
-                    values = 0.35 * np.sin(phase * 0.8 + np.arange(7) * 0.45)
-                    self.data.ctrl[self.actuator_ids[:7]] = values
-                    self.data.ctrl[self.actuator_ids[7:]] = -values
+                    wave = self.demo_amplitude * np.sin(phase * 0.7 + self.demo_phase)
+                    desired = self.demo_center.copy()
+                    desired[:7] += wave
+                    desired[7:] += wave * np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
+                    limits = self.model.jnt_range[self.joint_ids]
+                    desired = np.clip(desired, limits[:, 0] + 0.02, limits[:, 1] - 0.02)
+                    qpos = self.data.qpos[self.qpos_addresses]
+                    qvel = self.data.qvel[self.dof_addresses]
+                    gravity_and_bias = self.data.qfrc_bias[self.dof_addresses]
+                    torque = self.kp * (desired - qpos) - self.kd * qvel + gravity_and_bias
+                    force_limits = self.model.actuator_forcerange[self.actuator_ids]
+                    torque = np.clip(torque, force_limits[:, 0], force_limits[:, 1])
+                    self.data.ctrl[self.actuator_ids] = torque
                 mujoco.mj_step(self.model, self.data)
 
                 if now >= next_render:
@@ -165,6 +193,13 @@ class Simulation:
         with self.camera_lock:
             self.camera_commands.append((action, dx, dy))
 
+    def state(self) -> dict[str, float]:
+        qpos = self.data.qpos[self.qpos_addresses].copy()
+        return {
+            "time": float(self.data.time),
+            "motion": float(np.linalg.norm(qpos - self.initial_arm_qpos)),
+        }
+
 
 class Handler(BaseHTTPRequestHandler):
     simulation: Simulation
@@ -176,6 +211,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(HTML)))
             self.end_headers()
             self.wfile.write(HTML)
+            return
+        if self.path == "/state.json":
+            payload = json.dumps(self.simulation.state()).encode()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
             return
         if self.path != "/stream.mjpg":
             self.send_error(HTTPStatus.NOT_FOUND)
