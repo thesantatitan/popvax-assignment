@@ -53,6 +53,10 @@ cd /home/dev/popvax-assignment/openarm-mujoco
 MUJOCO_GL=egl uv run python headless_server.py --demo-motion
 ```
 
+On WSL, the server automatically selects Mesa's D3D12 backend when `/dev/dxg`
+is available. This prevents EGL from silently falling back to the CPU-based
+`llvmpipe` renderer.
+
 Open <http://localhost:8080> on Windows. The optional demo motion is generated
 with actuator torques and physics stepping; omit `--demo-motion` for a stationary
 scene ready to be connected to the retargeting controller.

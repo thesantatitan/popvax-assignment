@@ -14,6 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 os.environ.setdefault("MUJOCO_GL", "egl")
+if Path("/dev/dxg").exists():
+    os.environ.setdefault("GALLIUM_DRIVER", "d3d12")
 
 import mujoco
 import numpy as np
