@@ -57,6 +57,13 @@ Open <http://localhost:8080> on Windows. The optional demo motion is generated
 with actuator torques and physics stepping; omit `--demo-motion` for a stationary
 scene ready to be connected to the retargeting controller.
 
+The browser viewer supports:
+
+- left-drag to orbit;
+- right-drag to pan;
+- mouse wheel to zoom;
+- double-click or **Reset camera** to restore the default view.
+
 Useful options:
 
 ```bash

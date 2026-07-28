@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import io
+import json
 import os
 import threading
 import time
@@ -28,10 +30,52 @@ ARM_ACTUATORS = [
 HTML = b"""<!doctype html>
 <html><head><meta charset="utf-8"><title>OpenArm MuJoCo</title>
 <style>
-body{margin:0;background:#111;color:#eee;font:16px system-ui;text-align:center}
-h1{font-size:20px;margin:14px}img{max-width:100vw;max-height:calc(100vh - 60px)}
-</style></head><body><h1>OpenArm bimanual - headless MuJoCo/EGL</h1>
-<img src="/stream.mjpg" alt="MuJoCo stream"></body></html>"""
+html,body{height:100%;margin:0;background:#111;color:#eee;font:14px system-ui;overflow:hidden}
+header{height:42px;display:flex;align-items:center;gap:16px;padding:0 14px;background:#191919}
+h1{font-size:16px;margin:0}button{margin-left:auto;padding:5px 12px;cursor:pointer}
+#viewport{height:calc(100% - 42px);display:grid;place-items:center}
+img{display:block;max-width:100%;max-height:100%;user-select:none;cursor:grab}
+img.dragging{cursor:grabbing}.help{color:#aaa}
+</style></head><body>
+<header><h1>OpenArm bimanual - headless MuJoCo/EGL</h1>
+<span class="help">Left drag: orbit | Right drag: pan | Wheel: zoom | Double-click: reset</span>
+<button id="reset">Reset camera</button></header>
+<div id="viewport"><img id="stream" src="/stream.mjpg" draggable="false" alt="MuJoCo stream"></div>
+<script>
+const image=document.getElementById("stream");
+let drag=null,pending=null,scheduled=false;
+async function camera(action,dx=0,dy=0){
+  try{await fetch("/camera",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action,dx,dy})});}catch(_){}
+}
+function flush(){
+  scheduled=false;if(!pending)return;
+  const move=pending;pending=null;camera(move.action,move.dx,move.dy);
+}
+image.addEventListener("contextmenu",event=>event.preventDefault());
+image.addEventListener("pointerdown",event=>{
+  if(event.button!==0&&event.button!==2)return;
+  drag={action:event.button===0?"rotate":"pan",x:event.clientX,y:event.clientY};
+  image.setPointerCapture(event.pointerId);image.classList.add("dragging");
+});
+image.addEventListener("pointermove",event=>{
+  if(!drag)return;
+  const scale=Math.max(1,image.clientHeight);
+  const dx=(event.clientX-drag.x)/scale,dy=(event.clientY-drag.y)/scale;
+  drag.x=event.clientX;drag.y=event.clientY;
+  if(pending&&pending.action===drag.action){pending.dx+=dx;pending.dy+=dy;}
+  else pending={action:drag.action,dx,dy};
+  if(!scheduled){scheduled=true;requestAnimationFrame(flush);}
+});
+function endDrag(){drag=null;image.classList.remove("dragging");}
+image.addEventListener("pointerup",endDrag);
+image.addEventListener("pointercancel",endDrag);
+image.addEventListener("wheel",event=>{
+  event.preventDefault();camera("zoom",0,event.deltaY/Math.max(1,image.clientHeight));
+},{passive:false});
+image.addEventListener("dblclick",()=>camera("reset"));
+document.getElementById("reset").addEventListener("click",()=>camera("reset"));
+</script></body></html>"""
 
 
 class Simulation:
@@ -48,6 +92,10 @@ class Simulation:
         self.frame = b""
         self.frame_number = 0
         self.running = True
+        self.camera_commands: collections.deque[tuple[str, float, float]] = (
+            collections.deque()
+        )
+        self.camera_lock = threading.Lock()
         self.actuator_ids = np.array(
             [
                 mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
@@ -59,6 +107,8 @@ class Simulation:
         render_period = 1.0 / self.fps
         next_render = time.monotonic()
         start = next_render
+        camera = mujoco.MjvCamera()
+        mujoco.mjv_defaultFreeCamera(self.model, camera)
         with mujoco.Renderer(self.model, height=self.height, width=self.width) as renderer:
             while self.running:
                 now = time.monotonic()
@@ -70,7 +120,27 @@ class Simulation:
                 mujoco.mj_step(self.model, self.data)
 
                 if now >= next_render:
-                    renderer.update_scene(self.data, camera="front_camera")
+                    with self.camera_lock:
+                        commands = list(self.camera_commands)
+                        self.camera_commands.clear()
+                    for action, dx, dy in commands:
+                        if action == "reset":
+                            mujoco.mjv_defaultFreeCamera(self.model, camera)
+                        else:
+                            mouse_action = {
+                                "rotate": mujoco.mjtMouse.mjMOUSE_ROTATE_V,
+                                "pan": mujoco.mjtMouse.mjMOUSE_MOVE_V,
+                                "zoom": mujoco.mjtMouse.mjMOUSE_ZOOM,
+                            }[action]
+                            mujoco.mjv_moveCamera(
+                                self.model,
+                                mouse_action,
+                                dx,
+                                dy,
+                                renderer.scene,
+                                camera,
+                            )
+                    renderer.update_scene(self.data, camera=camera)
                     rgb = renderer.render()
                     output = io.BytesIO()
                     Image.fromarray(rgb).save(output, format="JPEG", quality=85)
@@ -88,6 +158,12 @@ class Simulation:
                 lambda: self.frame_number > after or not self.running, timeout=2.0
             )
             return self.frame_number, self.frame
+
+    def queue_camera(self, action: str, dx: float, dy: float) -> None:
+        if action not in {"rotate", "pan", "zoom", "reset"}:
+            raise ValueError(f"Unknown camera action: {action}")
+        with self.camera_lock:
+            self.camera_commands.append((action, dx, dy))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -124,6 +200,26 @@ class Handler(BaseHTTPRequestHandler):
                 )
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def do_POST(self) -> None:
+        if self.path != "/camera":
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length > 4096:
+                raise ValueError("Request body is too large")
+            payload = json.loads(self.rfile.read(length))
+            self.simulation.queue_camera(
+                str(payload["action"]),
+                float(payload.get("dx", 0.0)),
+                float(payload.get("dy", 0.0)),
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"{self.client_address[0]} - {format % args}")
