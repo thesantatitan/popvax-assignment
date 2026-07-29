@@ -15,7 +15,7 @@ import onnxruntime as ort
 from rtmlib import YOLOX, Custom, Wholebody3d, draw_skeleton
 
 from .confidence import ContinuousConfidenceGate
-from .contracts import BrowserFrame, RenderedFrame
+from .contracts import RETARGET_MODES, BrowserFrame, RenderedFrame, RetargetMode
 from .ipc import configure_parent_death_signal, drain_latest, put_latest
 from .retarget import SimccRetargeter, target_record
 
@@ -158,6 +158,7 @@ def _annotate(
 
 def perception_worker(
     frame_queue,
+    mode_queue,
     target_queue,
     pose_frame_queue,
     telemetry_queue,
@@ -185,8 +186,14 @@ def perception_worker(
     last_input_wall: float | None = None
     timeout_reported = False
     smoothed_fps = 0.0
+    mode: RetargetMode = "both"
     with target_log.open("a", encoding="utf-8", buffering=1) as output:
         while not stop_event.is_set() and os.getppid() == parent_pid:
+            requested_mode = drain_latest(mode_queue)
+            if requested_mode in RETARGET_MODES and requested_mode != mode:
+                mode = requested_mode
+                engaged_event.clear()
+                gate_state = gate.reset()
             if tracking_reset_event.is_set():
                 tracking_reset_event.clear()
                 engaged_event.clear()
@@ -210,6 +217,7 @@ def perception_worker(
                             "processing_ms": None,
                             "device": device,
                             "backend": backend,
+                            "mode": mode,
                             "engaged": False,
                             "tracking_state": gate_state.state,
                             "confidence_seconds": 0.0,
@@ -247,7 +255,7 @@ def perception_worker(
                 keypoints_2d = np.asarray(keypoints_2d_raw)
                 people = len(scores) if scores.ndim == 2 else 0
                 minimum_confidence, mean_confidence = (
-                    retargeter.confidence_summary(scores)
+                    retargeter.confidence_summary(scores, mode)
                 )
                 target = retargeter.make_target(
                     sequence=incoming.sequence,
@@ -255,6 +263,7 @@ def perception_worker(
                     inference_time_ns=time.monotonic_ns(),
                     simcc=simcc,
                     scores=scores,
+                    mode=mode,
                 )
                 gate_state = gate.update(True, time.monotonic_ns())
                 if gate_state.ready:
@@ -292,19 +301,19 @@ def perception_worker(
             )
             processing_ms = (now - started) * 1000.0
             if gate_state.state == "tracking":
-                mode = "TRACKING"
+                tracking_label = "TRACKING"
             elif gate_state.state in {"acquiring", "reacquiring"}:
-                mode = (
+                tracking_label = (
                     f"CONFIDENCE {gate_state.continuous_seconds:.1f}/"
                     f"{gate_state.required_seconds:.1f}s"
                 )
             elif gate_state.state == "holding":
-                mode = "LOW CONFIDENCE - HOLDING"
+                tracking_label = "LOW CONFIDENCE - HOLDING"
             else:
-                mode = "WAITING FOR POSE"
+                tracking_label = "WAITING FOR POSE"
             status = (
-                f"RTMW3D {backend} | {mode} | {smoothed_fps:.1f} FPS | "
-                f"{processing_ms:.0f} ms"
+                f"RTMW3D {backend} | {mode.upper()} | {tracking_label} | "
+                f"{smoothed_fps:.1f} FPS | {processing_ms:.0f} ms"
             )
             annotated = _annotate(
                 frame, keypoints_3d, keypoints_2d, scores, status
@@ -323,6 +332,7 @@ def perception_worker(
                     "processing_ms": round(processing_ms, 1),
                     "device": device,
                     "backend": backend,
+                    "mode": mode,
                     "engaged": gate_state.ready,
                     "tracking_state": gate_state.state,
                     "confidence_seconds": round(

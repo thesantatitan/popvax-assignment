@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+RetargetMode = Literal["elbow", "end_effector", "both"]
+RETARGET_MODES: tuple[RetargetMode, ...] = ("elbow", "end_effector", "both")
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,8 +19,7 @@ class BrowserFrame:
 @dataclass(frozen=True, slots=True)
 class ArmTarget:
     elbow_position_m: tuple[float, float, float]
-    wrist_position_m: tuple[float, float, float]
-    wrist_rotation: tuple[float, ...]
+    wrist_position_m: tuple[float, float, float] | None
     confidence: float
 
 
@@ -27,6 +30,7 @@ class RobotTarget:
     sequence: int
     capture_time_ns: int
     inference_time_ns: int
+    mode: RetargetMode
     left: ArmTarget
     right: ArmTarget
 

@@ -64,9 +64,11 @@ camera context, and the browser asks for that Mac's camera permission.
 ## Operator procedure
 
 1. Select **Start camera** and allow camera access.
-2. Face the camera with shoulders, elbows, wrists, and both hands visible.
-3. Keep every required keypoint confidently visible for two continuous seconds.
-4. Tracking engages automatically. If confidence drops, the robot holds its last
+2. Select **Elbow only**, **End effector only**, or **Elbow + end effector**.
+3. Face the camera with both shoulders and elbows visible; wrist visibility is
+   additionally required for modes that track the end effector.
+4. Keep every required keypoint confidently visible for two continuous seconds.
+5. Tracking engages automatically. If confidence drops, the robot holds its last
    pose and requires another continuous two-second confident interval.
 
 The simulation holds its last actuator command if targets become stale. Closing the
@@ -74,18 +76,20 @@ browser or selecting **Stop** disengages new target application.
 
 ## Coordinate and IK contract
 
-`RobotTarget` is expressed in metres and rotation matrices in the model's
-`arm_origin` frame:
+`RobotTarget` positions are expressed in metres in the model's `arm_origin` frame:
 
 - RTMW3D decoded SimCC coordinates supply relative shoulder-elbow-wrist directions.
 - Human segment magnitude is discarded; directions are scaled to the OpenArm's
   measured 0.220 m upper arm and 0.216 m forearm.
 - Limb directions map directly from camera coordinates into the robot base frame;
   there is no neutral-pose calibration or relative-motion offset.
-- Wrist orientation and elbow position remain available in `RobotTarget` and the
-  logs, but the IK objective uses only end-effector position.
-- IK uses the analytic MuJoCo end-effector position Jacobian and joint-limit
-  clipping. Its joint solution is exponentially smoothed at the control rate.
+- Hand pose and end-effector orientation are ignored.
+- **Elbow only** uses only the elbow-position residual and body Jacobian.
+- **End effector only** uses only the end-effector-position residual and site
+  Jacobian.
+- **Elbow + end effector** stacks both position residuals and Jacobians.
+- IK applies joint-limit clipping, and its joint solution is exponentially
+  smoothed at the control rate.
 
 Intermediate targets, the selected person's decoded `keypoints_simcc`, and that
 person's detection index are logged to `logs/targets-*.jsonl`; achieved elbow/wrist

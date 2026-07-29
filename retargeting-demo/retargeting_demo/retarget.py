@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 import numpy as np
 
-from .contracts import ArmTarget, RobotTarget
+from .contracts import RETARGET_MODES, ArmTarget, RetargetMode, RobotTarget
 
 BODY = {
     "left": {"shoulder": 5, "elbow": 7, "wrist": 9, "hand_start": 91},
@@ -18,13 +18,6 @@ SHOULDER_POSITIONS = {
 }
 UPPER_ARM_LENGTH_M = 0.220
 FOREARM_LENGTH_M = 0.216
-# Hand-frame columns are finger direction, palm-across, and palm normal.
-# OpenArm tool -Z follows the fingers and tool Y follows palm-across.
-HAND_TO_END_EFFECTOR = np.array(
-    [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]],
-    dtype=np.float64,
-)
-
 # RTMW3D: +x image-right, +y image-down, +z depth. OpenArm arm_origin:
 # +x forward into the cell, +y robot-left, +z up.
 CAMERA_TO_ROBOT = np.array(
@@ -33,21 +26,14 @@ CAMERA_TO_ROBOT = np.array(
 )
 
 
-def required_keypoint_indices() -> list[int]:
+def required_keypoint_indices(mode: RetargetMode) -> list[int]:
+    if mode not in RETARGET_MODES:
+        raise ValueError(f"Unsupported retargeting mode: {mode}")
     required: list[int] = []
     for indices in BODY.values():
-        required.extend(
-            [
-                indices["shoulder"],
-                indices["elbow"],
-                indices["wrist"],
-                indices["hand_start"],
-                indices["hand_start"] + 5,
-                indices["hand_start"] + 9,
-                indices["hand_start"] + 13,
-                indices["hand_start"] + 17,
-            ]
-        )
+        required.extend([indices["shoulder"], indices["elbow"]])
+        if mode != "elbow":
+            required.append(indices["wrist"])
     return sorted(set(required))
 
 
@@ -77,18 +63,6 @@ def simcc_to_camera_points(simcc: np.ndarray) -> np.ndarray:
     return points
 
 
-def hand_frame(points: np.ndarray, hand_start: int) -> np.ndarray:
-    """Return a right-handed palm frame from wrist and MCP landmarks."""
-
-    hand = points[hand_start : hand_start + 21]
-    wrist = hand[0]
-    palm_forward = _unit((hand[5] + hand[9] + hand[13] + hand[17]) * 0.25 - wrist)
-    palm_across = _unit(hand[5] - hand[17])
-    palm_normal = _unit(np.cross(palm_forward, palm_across))
-    palm_across = _unit(np.cross(palm_normal, palm_forward))
-    return np.column_stack((palm_forward, palm_across, palm_normal))
-
-
 class SimccRetargeter:
     """Body-size-invariant absolute bimanual retargeting."""
 
@@ -101,8 +75,8 @@ class SimccRetargeter:
         if not 0.0 < smoothing_alpha <= 1.0:
             raise ValueError("smoothing_alpha must be in (0, 1]")
         self.smoothing_alpha = smoothing_alpha
-        self.last_rotations: dict[str, np.ndarray] = {}
-        self.last_directions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        self.last_upper_directions: dict[str, np.ndarray] = {}
+        self.last_forearm_directions: dict[str, np.ndarray] = {}
 
     def select_person(self, scores: np.ndarray) -> int:
         body_scores = np.asarray(scores)[:, :17]
@@ -111,10 +85,12 @@ class SimccRetargeter:
             raise ValueError("No valid person")
         return int(np.nanargmax(means))
 
-    def confidence_summary(self, scores: np.ndarray) -> tuple[float, float]:
+    def confidence_summary(
+        self, scores: np.ndarray, mode: RetargetMode
+    ) -> tuple[float, float]:
         person = self.select_person(scores)
         required_scores = np.asarray(scores, dtype=np.float64)[
-            person, required_keypoint_indices()
+            person, required_keypoint_indices(mode)
         ]
         return float(np.min(required_scores)), float(np.mean(required_scores))
 
@@ -126,86 +102,63 @@ class SimccRetargeter:
         inference_time_ns: int,
         simcc: np.ndarray,
         scores: np.ndarray,
+        mode: RetargetMode,
     ) -> RobotTarget:
+        if mode not in RETARGET_MODES:
+            raise ValueError(f"Unsupported retargeting mode: {mode}")
         person = self.select_person(scores)
         person_scores = np.asarray(scores, dtype=np.float64)[person]
         camera_points = simcc_to_camera_points(np.asarray(simcc)[person])
         robot_points = camera_points @ CAMERA_TO_ROBOT.T
 
-        frames: dict[str, np.ndarray] = {}
         for side, indices in BODY.items():
-            required = [
-                indices["shoulder"],
-                indices["elbow"],
-                indices["wrist"],
-                indices["hand_start"],
-                indices["hand_start"] + 5,
-                indices["hand_start"] + 9,
-                indices["hand_start"] + 13,
-                indices["hand_start"] + 17,
-            ]
+            required = [indices["shoulder"], indices["elbow"]]
+            if mode != "elbow":
+                required.append(indices["wrist"])
             if np.min(person_scores[required]) < self.confidence_threshold:
-                raise ValueError(f"{side} arm/hand confidence is too low")
-            frames[side] = hand_frame(robot_points, indices["hand_start"])
+                raise ValueError(f"{side} arm confidence is too low")
 
         arms: dict[str, ArmTarget] = {}
         for side, indices in BODY.items():
             shoulder = robot_points[indices["shoulder"]]
             elbow = robot_points[indices["elbow"]]
-            wrist = robot_points[indices["wrist"]]
             upper_direction = _unit(elbow - shoulder)
-            forearm_direction = _unit(wrist - elbow)
-            if side in self.last_directions:
-                previous_upper, previous_forearm = self.last_directions[side]
+            if side in self.last_upper_directions:
                 alpha = self.smoothing_alpha
                 upper_direction = _unit(
-                    alpha * upper_direction + (1.0 - alpha) * previous_upper
+                    alpha * upper_direction
+                    + (1.0 - alpha) * self.last_upper_directions[side]
                 )
-                forearm_direction = _unit(
-                    alpha * forearm_direction + (1.0 - alpha) * previous_forearm
-                )
-            self.last_directions[side] = (
-                upper_direction.copy(),
-                forearm_direction.copy(),
-            )
+            self.last_upper_directions[side] = upper_direction.copy()
             elbow_target = (
                 SHOULDER_POSITIONS[side] + UPPER_ARM_LENGTH_M * upper_direction
             )
-            wrist_target = elbow_target + FOREARM_LENGTH_M * forearm_direction
 
-            wrist_rotation = frames[side] @ HAND_TO_END_EFFECTOR
-            if side in self.last_rotations:
-                alpha = self.smoothing_alpha
-                blended = (
-                    alpha * wrist_rotation
-                    + (1.0 - alpha) * self.last_rotations[side]
+            wrist_target: np.ndarray | None = None
+            if mode != "elbow":
+                wrist = robot_points[indices["wrist"]]
+                forearm_direction = _unit(wrist - elbow)
+                if side in self.last_forearm_directions:
+                    alpha = self.smoothing_alpha
+                    forearm_direction = _unit(
+                        alpha * forearm_direction
+                        + (1.0 - alpha) * self.last_forearm_directions[side]
+                    )
+                self.last_forearm_directions[side] = forearm_direction.copy()
+                wrist_target = (
+                    elbow_target + FOREARM_LENGTH_M * forearm_direction
                 )
-                left, _, right = np.linalg.svd(blended)
-                wrist_rotation = left @ right
-                if np.linalg.det(wrist_rotation) < 0.0:
-                    left[:, -1] *= -1.0
-                    wrist_rotation = left @ right
-            self.last_rotations[side] = wrist_rotation
-            arm_confidence = float(
-                np.mean(
-                    person_scores[
-                        [
-                            indices["shoulder"],
-                            indices["elbow"],
-                            indices["wrist"],
-                            indices["hand_start"],
-                            indices["hand_start"] + 5,
-                            indices["hand_start"] + 9,
-                            indices["hand_start"] + 13,
-                            indices["hand_start"] + 17,
-                        ]
-                    ]
-                )
-            )
+            required = [indices["shoulder"], indices["elbow"]]
+            if mode != "elbow":
+                required.append(indices["wrist"])
+            arm_confidence = float(np.mean(person_scores[required]))
             arms[side] = ArmTarget(
                 elbow_position_m=tuple(float(v) for v in elbow_target),
-                wrist_position_m=tuple(float(v) for v in wrist_target),
-                wrist_rotation=tuple(float(v) for v in wrist_rotation.reshape(-1)),
+                wrist_position_m=(
+                    tuple(float(v) for v in wrist_target)
+                    if wrist_target is not None
+                    else None
+                ),
                 confidence=arm_confidence,
             )
 
@@ -213,6 +166,7 @@ class SimccRetargeter:
             sequence=sequence,
             capture_time_ns=capture_time_ns,
             inference_time_ns=inference_time_ns,
+            mode=mode,
             left=arms["left"],
             right=arms["right"],
         )

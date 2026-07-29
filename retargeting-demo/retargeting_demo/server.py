@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from .contracts import BrowserFrame, RenderedFrame
+from .contracts import RETARGET_MODES, BrowserFrame, RenderedFrame
 from .ipc import drain_latest, put_latest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +22,7 @@ INDEX = ROOT / "web" / "index.html"
 @dataclass(slots=True)
 class Runtime:
     frame_queue: object
+    mode_queue: object
     pose_frame_queue: object
     sim_frame_queue: object
     perception_telemetry_queue: object
@@ -133,6 +134,12 @@ def create_app(runtime: Runtime) -> FastAPI:
             if action == "disengage" and controller is websocket:
                 runtime.engaged_event.clear()
                 runtime.tracking_reset_event.set()
+            elif action == "set_mode":
+                mode = command.get("mode")
+                if mode in RETARGET_MODES:
+                    runtime.engaged_event.clear()
+                    runtime.tracking_reset_event.set()
+                    put_latest(runtime.mode_queue, mode)
             elif action in {"rotate", "pan", "zoom", "reset"}:
                 put_latest(
                     runtime.camera_queue,

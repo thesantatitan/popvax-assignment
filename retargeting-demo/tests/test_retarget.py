@@ -4,10 +4,9 @@ from retargeting_demo.retarget import (
     BODY,
     CAMERA_TO_ROBOT,
     FOREARM_LENGTH_M,
-    HAND_TO_END_EFFECTOR,
     UPPER_ARM_LENGTH_M,
     SimccRetargeter,
-    hand_frame,
+    required_keypoint_indices,
     simcc_to_camera_points,
     target_record,
 )
@@ -42,15 +41,7 @@ def test_camera_mapping_is_a_rotation() -> None:
     assert np.linalg.det(CAMERA_TO_ROBOT) == 1.0
 
 
-def test_hand_frame_is_orthonormal() -> None:
-    simcc, _ = synthetic_pose()
-    points = simcc_to_camera_points(simcc[0]) @ CAMERA_TO_ROBOT.T
-    frame = hand_frame(points, BODY["left"]["hand_start"])
-    np.testing.assert_allclose(frame.T @ frame, np.eye(3), atol=1e-7)
-    assert np.linalg.det(frame) > 0.999
-
-
-def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
+def test_retargeting_has_robot_segment_lengths() -> None:
     simcc, scores = synthetic_pose()
     retargeter = SimccRetargeter()
     target = retargeter.make_target(
@@ -59,6 +50,7 @@ def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
         inference_time_ns=200,
         simcc=simcc,
         scores=scores,
+        mode="both",
     )
     robot_points = simcc_to_camera_points(simcc[0]) @ CAMERA_TO_ROBOT.T
     for side in ("left", "right"):
@@ -67,7 +59,7 @@ def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
         shoulder = np.array([0.0, 0.1535 if side == "left" else -0.1535, 0.0])
         elbow = np.asarray(arm.elbow_position_m)
         wrist = np.asarray(arm.wrist_position_m)
-        rotation = np.asarray(arm.wrist_rotation).reshape(3, 3)
+        assert arm.wrist_position_m is not None
         assert np.isclose(np.linalg.norm(elbow - shoulder), UPPER_ARM_LENGTH_M)
         assert np.isclose(np.linalg.norm(wrist - elbow), FOREARM_LENGTH_M)
         measured_upper = (
@@ -84,30 +76,54 @@ def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
         np.testing.assert_allclose(
             wrist, elbow + FOREARM_LENGTH_M * measured_forearm
         )
-        expected_rotation = (
-            hand_frame(robot_points, indices["hand_start"])
-            @ HAND_TO_END_EFFECTOR
-        )
-        np.testing.assert_allclose(rotation, expected_rotation)
-        np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-7)
 
 
-def test_low_hand_confidence_rejects_target() -> None:
+def test_hand_confidence_is_ignored() -> None:
     simcc, scores = synthetic_pose()
     scores[0, BODY["left"]["hand_start"] + 9] = 0.1
     retargeter = SimccRetargeter()
-    try:
-        retargeter.make_target(
-            sequence=1,
-            capture_time_ns=1,
-            inference_time_ns=2,
-            simcc=simcc,
-            scores=scores,
-        )
-    except ValueError as error:
-        assert "confidence" in str(error)
-    else:
-        raise AssertionError("low-confidence hand should not produce a target")
+    target = retargeter.make_target(
+        sequence=1,
+        capture_time_ns=1,
+        inference_time_ns=2,
+        simcc=simcc,
+        scores=scores,
+        mode="both",
+    )
+    assert target.mode == "both"
+
+
+def test_modes_require_only_the_landmarks_they_control() -> None:
+    assert required_keypoint_indices("elbow") == [5, 6, 7, 8]
+    assert required_keypoint_indices("end_effector") == [5, 6, 7, 8, 9, 10]
+    assert required_keypoint_indices("both") == [5, 6, 7, 8, 9, 10]
+
+    simcc, scores = synthetic_pose()
+    scores[0, BODY["left"]["wrist"]] = 0.1
+    elbow_target = SimccRetargeter().make_target(
+        sequence=2,
+        capture_time_ns=1,
+        inference_time_ns=2,
+        simcc=simcc,
+        scores=scores,
+        mode="elbow",
+    )
+    assert elbow_target.left.wrist_position_m is None
+
+    for mode in ("end_effector", "both"):
+        try:
+            SimccRetargeter().make_target(
+                sequence=2,
+                capture_time_ns=1,
+                inference_time_ns=2,
+                simcc=simcc,
+                scores=scores,
+                mode=mode,
+            )
+        except ValueError as error:
+            assert "confidence" in str(error)
+        else:
+            raise AssertionError(f"{mode} should require wrist confidence")
 
 
 def test_target_record_includes_selected_simcc_keypoints() -> None:
@@ -118,6 +134,7 @@ def test_target_record_includes_selected_simcc_keypoints() -> None:
         inference_time_ns=200,
         simcc=simcc,
         scores=scores,
+        mode="end_effector",
     )
 
     record = target_record(

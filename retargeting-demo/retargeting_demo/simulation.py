@@ -120,22 +120,45 @@ class BimanualIk:
         for _ in range(iterations):
             for side in SIDES:
                 arm_target = getattr(target, side)
-                wrist_target, _ = self._base_to_world(
-                    np.asarray(arm_target.wrist_position_m), np.eye(3)
-                )
+                mode = target.mode
+                errors: list[np.ndarray] = []
+                jacobians: list[np.ndarray] = []
+                elbow_body = self.elbow_bodies[side]
                 wrist_site = self.wrist_sites[side]
                 dofs = self.dof_addresses[side]
 
-                jac_wrist = np.zeros((3, self.model.nv))
-                mujoco.mj_jacSite(
-                    self.model,
-                    self.data,
-                    jac_wrist,
-                    None,
-                    wrist_site,
-                )
-                error = wrist_target - self.data.site_xpos[wrist_site]
-                jacobian = jac_wrist[:, dofs]
+                if mode in {"elbow", "both"}:
+                    elbow_target, _ = self._base_to_world(
+                        np.asarray(arm_target.elbow_position_m), np.eye(3)
+                    )
+                    jac_elbow = np.zeros((3, self.model.nv))
+                    mujoco.mj_jacBody(
+                        self.model, self.data, jac_elbow, None, elbow_body
+                    )
+                    errors.append(elbow_target - self.data.xpos[elbow_body])
+                    jacobians.append(jac_elbow[:, dofs])
+                if mode in {"end_effector", "both"}:
+                    if arm_target.wrist_position_m is None:
+                        raise ValueError(
+                            f"{mode} target is missing wrist_position_m"
+                        )
+                    wrist_target, _ = self._base_to_world(
+                        np.asarray(arm_target.wrist_position_m), np.eye(3)
+                    )
+                    jac_wrist = np.zeros((3, self.model.nv))
+                    mujoco.mj_jacSite(
+                        self.model,
+                        self.data,
+                        jac_wrist,
+                        None,
+                        wrist_site,
+                    )
+                    errors.append(
+                        wrist_target - self.data.site_xpos[wrist_site]
+                    )
+                    jacobians.append(jac_wrist[:, dofs])
+                error = np.concatenate(errors)
+                jacobian = np.vstack(jacobians)
                 system = jacobian @ jacobian.T
                 system.flat[:: system.shape[0] + 1] += damping**2
                 delta = jacobian.T @ np.linalg.solve(system, error)
@@ -177,9 +200,12 @@ class BimanualIk:
                 arm["elbow_error_m"] = float(
                     np.linalg.norm(elbow - np.asarray(desired.elbow_position_m))
                 )
-                arm["wrist_error_m"] = float(
-                    np.linalg.norm(wrist - np.asarray(desired.wrist_position_m))
-                )
+                if desired.wrist_position_m is not None:
+                    arm["wrist_error_m"] = float(
+                        np.linalg.norm(
+                            wrist - np.asarray(desired.wrist_position_m)
+                        )
+                    )
             result[side] = arm
         return result
 
@@ -340,6 +366,11 @@ def simulation_worker(
                         "simulation_time_s": round(float(data.time), 3),
                         "control_hz": round(1.0 / control_period, 1),
                         "render_fps": render_fps,
+                        "mode": (
+                            active_target.mode
+                            if active_target is not None
+                            else None
+                        ),
                         "lifter_target_m": lifter_top,
                         "lifter_position_m": round(
                             float(data.qpos[lifter_qpos_address]), 4
