@@ -1,0 +1,41 @@
+[project]
+name = "popvax-retargeting-demo"
+version = "0.1.0"
+description = "Browser-webcam to bimanual OpenArm retargeting demo"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "mujoco==3.6.0",
+    "pillow==11.3.0",
+    "rtmlib==0.0.15",
+    "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "onnxruntime-gpu==1.26.0; sys_platform == 'linux'",
+]
+tensorrt = [
+    "tensorrt-bindings==8.6.1; sys_platform == 'linux'",
+    "tensorrt-libs==8.6.1; sys_platform == 'linux'",
+    "nvidia-cudnn-cu12==8.9.7.29; sys_platform == 'linux'",
+]
+dev = [
+    "pytest>=8.4,<9",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
+
+[tool.uv.sources]
+tensorrt-bindings = { index = "nvidia" }
+tensorrt-libs = { index = "nvidia" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
