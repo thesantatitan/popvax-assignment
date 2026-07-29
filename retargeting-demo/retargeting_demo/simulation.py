@@ -110,9 +110,9 @@ class BimanualIk:
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
         damping = float(os.getenv("IK_DAMPING", "0.035"))
-        orientation_weight = float(os.getenv("IK_ORIENTATION_WEIGHT", "0.18"))
+        orientation_weight = float(os.getenv("IK_ORIENTATION_WEIGHT", "0.06"))
         elbow_weight = float(os.getenv("IK_ELBOW_WEIGHT", "0.8"))
-        iterations = int(os.getenv("IK_ITERATIONS", "10"))
+        iterations = int(os.getenv("IK_ITERATIONS", "25"))
 
         for _ in range(iterations):
             for side in SIDES:
@@ -244,7 +244,9 @@ def simulation_worker(
     ik = BimanualIk(model, data)
     arm_actuators = ik.all_actuator_ids
     desired = data.ctrl[arm_actuators].copy()
+    ik_solution = desired.copy()
     active_target: RobotTarget | None = None
+    target_dirty = False
     last_target_wall = 0.0
     latest_sequence = 0
 
@@ -269,16 +271,22 @@ def simulation_worker(
                 incoming = drain_latest(target_queue)
                 if incoming is not None:
                     active_target = incoming
+                    target_dirty = True
                     latest_sequence = incoming.sequence
                     last_target_wall = now
 
-                if now >= next_control and active_target is not None:
-                    solved = ik.solve(active_target, data.qpos)
+                if now >= next_control:
                     max_delta = 3.0 * control_period
-                    desired += np.clip(solved - desired, -max_delta, max_delta)
+                    desired += np.clip(
+                        ik_solution - desired, -max_delta, max_delta
+                    )
                     next_control += control_period
                     if next_control <= now:
                         next_control = now + control_period
+
+                if target_dirty and active_target is not None:
+                    ik_solution = ik.solve(active_target, data.qpos)
+                    target_dirty = False
 
                 target_simulation_time = now - wall_start
                 while data.time < target_simulation_time:

@@ -57,6 +57,7 @@
         display: grid; place-items: center;
       }
       .frame img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; }
+      .frame img[hidden] { display: none; }
       #simulation { cursor: grab; }
       #simulation.dragging { cursor: grabbing; }
       .empty { position: absolute; color: #68768a; pointer-events: none; }
@@ -112,7 +113,7 @@
           </div>
           <div class="frame">
             <span id="poseEmpty" class="empty">Waiting for camera frames</span>
-            <img id="pose" alt="Annotated webcam pose" />
+            <img id="pose" alt="Annotated webcam pose" hidden />
           </div>
         </article>
         <article class="view">
@@ -122,7 +123,7 @@
           </div>
           <div class="frame">
             <span id="simEmpty" class="empty">Waiting for MuJoCo renderer</span>
-            <img id="simulation" draggable="false" alt="OpenArm MuJoCo simulation" />
+            <img id="simulation" draggable="false" alt="OpenArm MuJoCo simulation" hidden />
           </div>
         </article>
       </section>
@@ -211,12 +212,14 @@
           if (poseUrl) URL.revokeObjectURL(poseUrl);
           poseUrl = URL.createObjectURL(jpeg);
           poseImage.src = poseUrl;
+          poseImage.hidden = false;
           document.getElementById("poseEmpty").hidden = true;
           awaitingPose = false;
         } else if (kind === 83) {
           if (simUrl) URL.revokeObjectURL(simUrl);
           simUrl = URL.createObjectURL(jpeg);
           simImage.src = simUrl;
+          simImage.hidden = false;
           document.getElementById("simEmpty").hidden = true;
         }
       }
@@ -236,16 +239,32 @@
         stopped = true;
         awaitingPose = false;
         sendCommand({ action: "disengage" });
-        if (socket) { socket.close(); socket = null; }
         if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
         video.srcObject = null;
         startButton.disabled = false;
         stopButton.disabled = true;
         calibrateButton.disabled = true;
-        connection.textContent = "Server offline";
-        connection.className = "connection";
         value("cameraState", "inactive");
         setMessage("Start the camera on this device.");
+      }
+      function connectSocket() {
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+        socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+        socket.binaryType = "blob";
+        socket.onopen = () => {
+          connection.textContent = "Pipeline connected";
+          connection.className = "connection online";
+          setMessage(stream ? "Keep both arms and hands visible, then calibrate." : "Start the camera on this device.");
+        };
+        socket.onmessage = receiveMessage;
+        socket.onerror = () => setMessage("WebSocket error. Check the server and SSH tunnel.");
+        socket.onclose = () => {
+          connection.textContent = "Server offline";
+          connection.className = "connection";
+          if (!stopped) setMessage("Server disconnected.");
+          awaitingPose = false;
+          socket = null;
+        };
       }
       async function start() {
         stop();
@@ -263,20 +282,9 @@
           canvas.width = Math.min(video.videoWidth || 640, 640);
           canvas.height = Math.round(canvas.width * (video.videoHeight || 480) / (video.videoWidth || 640));
           value("cameraState", `${canvas.width}×${canvas.height}`);
-          socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-          socket.binaryType = "blob";
-          socket.onopen = () => {
-            connection.textContent = "Pipeline connected";
-            connection.className = "connection online";
-            setMessage("Keep both arms and hands visible, then calibrate.");
-            requestAnimationFrame(captureNext);
-          };
-          socket.onmessage = receiveMessage;
-          socket.onerror = () => setMessage("WebSocket error. Check the server and SSH tunnel.");
-          socket.onclose = () => {
-            if (!stopped) setMessage("Server disconnected.");
-            awaitingPose = false;
-          };
+          connectSocket();
+          setMessage("Keep both arms and hands visible, then calibrate.");
+          requestAnimationFrame(captureNext);
         } catch (error) {
           stop();
           setMessage(error.name === "NotAllowedError" ? "Camera permission was denied." : error.message);
@@ -321,7 +329,11 @@
         sendCommand({ action: "zoom", dy: event.deltaY / Math.max(1, simImage.clientHeight) });
       }, { passive: false });
       simImage.addEventListener("dblclick", () => sendCommand({ action: "reset" }));
-      window.addEventListener("beforeunload", stop);
+      window.addEventListener("beforeunload", () => {
+        stop();
+        if (socket) socket.close();
+      });
+      connectSocket();
     </script>
   </body>
 </html>
