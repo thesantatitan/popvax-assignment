@@ -126,6 +126,10 @@ def test_retargeting_has_robot_segment_lengths() -> None:
         elbow = np.asarray(arm.elbow_position_m)
         wrist = np.asarray(arm.wrist_position_m)
         assert arm.wrist_position_m is not None
+        assert arm.wrist_rotation is not None
+        rotation = np.asarray(arm.wrist_rotation).reshape(3, 3)
+        np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-7)
+        assert np.linalg.det(rotation) == pytest.approx(1.0)
         assert np.isclose(np.linalg.norm(elbow - shoulder), UPPER_ARM_LENGTH_M)
         assert np.isclose(np.linalg.norm(wrist - elbow), FOREARM_LENGTH_M)
         measured_upper = (
@@ -144,25 +148,52 @@ def test_retargeting_has_robot_segment_lengths() -> None:
         )
 
 
-def test_hand_confidence_is_ignored() -> None:
+def test_hand_confidence_is_required_only_for_end_effector_modes() -> None:
     simcc, scores = synthetic_pose()
     scores[0, BODY["left"]["hand_start"] + 9] = 0.1
-    retargeter = SimccRetargeter()
-    target = retargeter.make_target(
+    elbow_target = SimccRetargeter().make_target(
         sequence=1,
         capture_time_ns=1,
         inference_time_ns=2,
         simcc=simcc,
         scores=scores,
-        mode="both",
+        mode="elbow",
     )
-    assert target.mode == "both"
+    assert elbow_target.left.wrist_rotation is None
+
+    with pytest.raises(ValueError, match="hand confidence"):
+        SimccRetargeter().make_target(
+            sequence=1,
+            capture_time_ns=1,
+            inference_time_ns=2,
+            simcc=simcc,
+            scores=scores,
+            mode="both",
+        )
 
 
 def test_modes_require_only_the_landmarks_they_control() -> None:
     assert required_keypoint_indices("elbow") == [5, 6, 7, 8]
-    assert required_keypoint_indices("end_effector") == [5, 6, 7, 8, 9, 10]
-    assert required_keypoint_indices("both") == [5, 6, 7, 8, 9, 10]
+    end_effector_indices = [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        91,
+        96,
+        100,
+        104,
+        108,
+        112,
+        117,
+        121,
+        125,
+        129,
+    ]
+    assert required_keypoint_indices("end_effector") == end_effector_indices
+    assert required_keypoint_indices("both") == end_effector_indices
 
     simcc, scores = synthetic_pose()
     scores[0, BODY["left"]["wrist"]] = 0.1

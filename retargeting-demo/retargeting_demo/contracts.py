@@ -21,6 +21,7 @@ class ArmTarget:
     elbow_position_m: tuple[float, float, float]
     wrist_position_m: tuple[float, float, float] | None
     confidence: float
+    wrist_rotation: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

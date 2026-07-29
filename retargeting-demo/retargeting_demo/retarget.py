@@ -14,6 +14,7 @@ BODY = {
     "left": {"shoulder": 5, "elbow": 7, "wrist": 9, "hand_start": 91},
     "right": {"shoulder": 6, "elbow": 8, "wrist": 10, "hand_start": 112},
 }
+HAND_FRAME_OFFSETS = (0, 5, 9, 13, 17)
 SHOULDER_POSITIONS = {
     "left": np.array([0.0, 0.1535, 0.0]),
     "right": np.array([0.0, -0.1535, 0.0]),
@@ -50,6 +51,10 @@ def required_keypoint_indices(mode: RetargetMode) -> list[int]:
         required.extend([indices["shoulder"], indices["elbow"]])
         if mode != "elbow":
             required.append(indices["wrist"])
+            required.extend(
+                indices["hand_start"] + offset
+                for offset in HAND_FRAME_OFFSETS
+            )
     return sorted(set(required))
 
 
@@ -58,6 +63,42 @@ def _unit(vector: np.ndarray) -> np.ndarray:
     if not np.isfinite(norm) or norm < 1e-6:
         raise ValueError("Degenerate limb or hand direction")
     return vector / norm
+
+
+def hand_frame(
+    points: np.ndarray,
+    hand_start: int,
+    side: str,
+) -> np.ndarray:
+    """Return an absolute right-handed hand frame in robot-base coordinates."""
+
+    hand = points[hand_start : hand_start + 21]
+    wrist = hand[0]
+    finger_direction = _unit(
+        np.mean(hand[[5, 9, 13, 17]], axis=0) - wrist
+    )
+    # Use the mirrored anatomical ordering so both hands map to the same tool
+    # convention: +x along fingers, +y across the palm toward robot-left, and
+    # +z along the palm normal.
+    across_hint = (
+        hand[17] - hand[5] if side == "left" else hand[5] - hand[17]
+    )
+    palm_normal = _unit(np.cross(finger_direction, across_hint))
+    palm_across = _unit(np.cross(palm_normal, finger_direction))
+    return np.column_stack((finger_direction, palm_across, palm_normal))
+
+
+def smooth_rotation(
+    previous: np.ndarray,
+    current: np.ndarray,
+    alpha: float,
+) -> np.ndarray:
+    """Interpolate on SO(3), preserving a valid rotation matrix."""
+
+    relative = previous.T @ current
+    rotation_vector, _ = cv2.Rodrigues(relative)
+    incremental, _ = cv2.Rodrigues(alpha * rotation_vector)
+    return previous @ incremental
 
 
 def simcc_to_camera_points(simcc: np.ndarray) -> np.ndarray:
@@ -164,7 +205,7 @@ class SimccRetargeter:
     def __init__(
         self,
         confidence_threshold: float = 0.35,
-        smoothing_time_constant_s: float = 0.12,
+        smoothing_time_constant_s: float = 0.25,
     ) -> None:
         self.confidence_threshold = confidence_threshold
         if smoothing_time_constant_s < 0.0:
@@ -172,6 +213,7 @@ class SimccRetargeter:
         self.smoothing_time_constant_s = smoothing_time_constant_s
         self.last_upper_directions: dict[str, np.ndarray] = {}
         self.last_forearm_directions: dict[str, np.ndarray] = {}
+        self.last_hand_rotations: dict[str, np.ndarray] = {}
         self.last_inference_time_ns: int | None = None
 
     def reset_smoothing(self) -> None:
@@ -179,6 +221,7 @@ class SimccRetargeter:
 
         self.last_upper_directions.clear()
         self.last_forearm_directions.clear()
+        self.last_hand_rotations.clear()
         self.last_inference_time_ns = None
 
     def select_person(self, scores: np.ndarray) -> int:
@@ -230,8 +273,12 @@ class SimccRetargeter:
             required = [indices["shoulder"], indices["elbow"]]
             if mode != "elbow":
                 required.append(indices["wrist"])
+                required.extend(
+                    indices["hand_start"] + offset
+                    for offset in HAND_FRAME_OFFSETS
+                )
             if np.min(person_scores[required]) < self.confidence_threshold:
-                raise ValueError(f"{side} arm confidence is too low")
+                raise ValueError(f"{side} arm/hand confidence is too low")
 
         smoothing_alpha = 1.0
         if self.last_inference_time_ns is not None:
@@ -259,6 +306,7 @@ class SimccRetargeter:
             )
 
             wrist_target: np.ndarray | None = None
+            wrist_rotation: np.ndarray | None = None
             if mode != "elbow":
                 wrist = robot_points[indices["wrist"]]
                 forearm_direction = _unit(wrist - elbow)
@@ -272,9 +320,23 @@ class SimccRetargeter:
                 wrist_target = (
                     elbow_target + FOREARM_LENGTH_M * forearm_direction
                 )
+                wrist_rotation = hand_frame(
+                    robot_points, indices["hand_start"], side
+                )
+                if side in self.last_hand_rotations:
+                    wrist_rotation = smooth_rotation(
+                        self.last_hand_rotations[side],
+                        wrist_rotation,
+                        smoothing_alpha,
+                    )
+                self.last_hand_rotations[side] = wrist_rotation.copy()
             required = [indices["shoulder"], indices["elbow"]]
             if mode != "elbow":
                 required.append(indices["wrist"])
+                required.extend(
+                    indices["hand_start"] + offset
+                    for offset in HAND_FRAME_OFFSETS
+                )
             arm_confidence = float(np.mean(person_scores[required]))
             arms[side] = ArmTarget(
                 elbow_position_m=tuple(float(v) for v in elbow_target),
@@ -284,6 +346,11 @@ class SimccRetargeter:
                     else None
                 ),
                 confidence=arm_confidence,
+                wrist_rotation=(
+                    tuple(float(v) for v in wrist_rotation.reshape(-1))
+                    if wrist_rotation is not None
+                    else None
+                ),
             )
 
         return RobotTarget(

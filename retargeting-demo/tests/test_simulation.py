@@ -137,3 +137,46 @@ def test_lifter_overshoot_is_excluded_from_mink_arm_limits() -> None:
     assert ik.last_diagnostics["excluded_dofs"] == model.nv - 14
     assert data.qpos[lifter_qpos] == pytest.approx(lifter_top + 1e-5)
     assert ik.data.qpos[lifter_qpos] == pytest.approx(lifter_top + 1e-5)
+
+
+def test_mink_tracks_end_effector_orientation() -> None:
+    model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
+    data = mujoco.MjData(model)
+    _initialize_model(model, data)
+    ik = BimanualIk(model, data)
+    achieved = ik.achieved_state(data, None)
+    angle = 0.15
+    cosine, sine = np.cos(angle), np.sin(angle)
+    local_rotation = np.array(
+        [[1.0, 0.0, 0.0], [0.0, cosine, -sine], [0.0, sine, cosine]]
+    )
+    arms = {}
+    for side in ("left", "right"):
+        rotation = (
+            np.asarray(achieved[side]["wrist_rotation"]).reshape(3, 3)
+            @ local_rotation
+        )
+        arms[side] = ArmTarget(
+            elbow_position_m=tuple(achieved[side]["elbow_position_m"]),
+            wrist_position_m=tuple(achieved[side]["wrist_position_m"]),
+            confidence=1.0,
+            wrist_rotation=tuple(rotation.reshape(-1)),
+        )
+    target = RobotTarget(
+        sequence=45,
+        capture_time_ns=1,
+        inference_time_ns=2,
+        mode="end_effector",
+        camera_intrinsics_enabled=False,
+        camera_intrinsics_source=None,
+        estimated_root_depth_m=None,
+        left=arms["left"],
+        right=arms["right"],
+    )
+
+    ik.solve(target, data.qpos)
+
+    assert ik.last_diagnostics is not None
+    assert ik.last_diagnostics["status"] == "converged"
+    assert ik.last_diagnostics["maximum_residual_m"] < 0.01
+    assert ik.last_diagnostics["maximum_orientation_residual_rad"] < 0.01

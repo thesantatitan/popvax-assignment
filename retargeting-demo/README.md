@@ -120,7 +120,10 @@ new profiles after calibrating a camera.
   measured 0.220 m upper arm and 0.216 m forearm.
 - Limb directions map directly from camera coordinates into the robot base frame;
   there is no neutral-pose calibration or relative-motion offset.
-- Hand pose and end-effector orientation are ignored.
+- Wrist, index-, middle-, ring-, and little-finger MCP landmarks define an
+  absolute right-handed palm frame. Its orientation is filtered with the same
+  Cartesian time constant and tracked by Mink whenever the selected mode
+  includes the end effector.
 - **Elbow only** uses only the elbow-position residual and body Jacobian.
 - **End effector only** uses only the end-effector-position residual and site
   Jacobian.
@@ -144,13 +147,11 @@ uv run python verify_runtime.py
 
 Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`,
 `IK_POSTURE_COST`, `IK_MAX_VELOCITY_RAD_S`, `IK_TASK_GAIN`,
-`IK_INTEGRATION_DT_S`, `IK_QP_SOLVER`,
+`IK_INTEGRATION_DT_S`, `IK_QP_SOLVER`, `IK_WRIST_ORIENTATION_COST`,
 `RETARGET_SMOOTHING_TAU_S`, `ROBOT_COMMAND_SMOOTHING_TAU_S`,
 `ROBOT_COMMAND_MAX_SPEED_RAD_S`, `RETARGET_CONFIDENCE`,
 `RETARGET_CONFIDENCE_SECONDS`, `RTMW3D_DET_FREQUENCY`, and
-`OPENARM_MODEL_PATH`. Set the Cartesian pose smoothing time constant to `0` to
-disable it; larger values make the target trajectory smoother and slower.
-The robot-joint filter also defaults to `0.12 s`; set
-`ROBOT_COMMAND_SMOOTHING_TAU_S=0` to disable its exponential component. The
-separate joint-speed limit remains active unless
-`ROBOT_COMMAND_MAX_SPEED_RAD_S` is increased.
+`OPENARM_MODEL_PATH`. Cartesian position and orientation smoothing default to
+`0.25 s`; set `RETARGET_SMOOTHING_TAU_S=0` to disable it. Robot-joint
+exponential smoothing defaults to `0`, while the separate joint-speed limit
+remains active unless `ROBOT_COMMAND_MAX_SPEED_RAD_S` is increased.

@@ -93,6 +93,7 @@ class BimanualIk:
         self.elbow_bodies: dict[str, int] = {}
         self.wrist_sites: dict[str, int] = {}
         self.elbow_tasks: dict[str, mink.FrameTask] = {}
+        self.wrist_position_tasks: dict[str, mink.FrameTask] = {}
         self.wrist_tasks: dict[str, mink.FrameTask] = {}
         for side in SIDES:
             actuators = np.array(
@@ -125,6 +126,16 @@ class BimanualIk:
                 lm_damping=float(os.getenv("IK_LM_DAMPING", "1e-4")),
             )
             self.wrist_tasks[side] = mink.FrameTask(
+                frame_name=f"{side}_ee_control_point",
+                frame_type="site",
+                position_cost=float(os.getenv("IK_WRIST_COST", "1.0")),
+                orientation_cost=float(
+                    os.getenv("IK_WRIST_ORIENTATION_COST", "0.25")
+                ),
+                gain=float(os.getenv("IK_TASK_GAIN", "0.7")),
+                lm_damping=float(os.getenv("IK_LM_DAMPING", "1e-4")),
+            )
+            self.wrist_position_tasks[side] = mink.FrameTask(
                 frame_name=f"{side}_ee_control_point",
                 frame_type="site",
                 position_cost=float(os.getenv("IK_WRIST_COST", "1.0")),
@@ -236,13 +247,26 @@ class BimanualIk:
                     raise ValueError(
                         f"{target.mode} target is missing wrist_position_m"
                     )
-                wrist_target, _ = self._base_to_world(
-                    np.asarray(arm_target.wrist_position_m), np.eye(3)
-                )
-                self.wrist_tasks[side].set_target(
-                    mink.SE3.from_translation(wrist_target)
-                )
-                tasks.append(self.wrist_tasks[side])
+                if arm_target.wrist_rotation is not None:
+                    wrist_target, wrist_rotation = self._base_to_world(
+                        np.asarray(arm_target.wrist_position_m),
+                        np.asarray(arm_target.wrist_rotation).reshape(3, 3),
+                    )
+                    self.wrist_tasks[side].set_target(
+                        mink.SE3.from_rotation_and_translation(
+                            mink.SO3.from_matrix(wrist_rotation),
+                            wrist_target,
+                        )
+                    )
+                    tasks.append(self.wrist_tasks[side])
+                else:
+                    wrist_target, _ = self._base_to_world(
+                        np.asarray(arm_target.wrist_position_m), np.eye(3)
+                    )
+                    self.wrist_position_tasks[side].set_target(
+                        mink.SE3.from_translation(wrist_target)
+                    )
+                    tasks.append(self.wrist_position_tasks[side])
 
         solver_error: str | None = None
         completed_iterations = 0
@@ -262,6 +286,7 @@ class BimanualIk:
         solution = self.data.qpos[self.all_qpos_addresses].copy()
         residuals: dict[str, dict[str, float]] = {}
         maximum_residual = 0.0
+        maximum_orientation_residual = 0.0
         for side in SIDES:
             arm_target = getattr(target, side)
             side_residuals: dict[str, float] = {}
@@ -287,9 +312,44 @@ class BimanualIk:
                         wrist_target - self.data.site_xpos[self.wrist_sites[side]]
                     )
                 )
+                if arm_target.wrist_rotation is not None:
+                    wrist_rotation_target = np.asarray(
+                        arm_target.wrist_rotation
+                    ).reshape(3, 3)
+                    _, wrist_rotation_target = self._base_to_world(
+                        np.asarray(arm_target.wrist_position_m),
+                        wrist_rotation_target,
+                    )
+                    wrist_rotation_actual = self.data.site_xmat[
+                        self.wrist_sites[side]
+                    ].reshape(3, 3)
+                    relative_rotation = (
+                        wrist_rotation_target.T @ wrist_rotation_actual
+                    )
+                    cosine = np.clip(
+                        (np.trace(relative_rotation) - 1.0) * 0.5,
+                        -1.0,
+                        1.0,
+                    )
+                    orientation_residual = float(np.arccos(cosine))
+                    side_residuals["wrist_orientation_rad"] = (
+                        orientation_residual
+                    )
+                    maximum_orientation_residual = max(
+                        maximum_orientation_residual,
+                        orientation_residual,
+                    )
             residuals[side] = side_residuals
-            maximum_residual = max(maximum_residual, *side_residuals.values())
+            position_residuals = [
+                value
+                for key, value in side_residuals.items()
+                if key.endswith("_position_m")
+            ]
+            maximum_residual = max(maximum_residual, *position_residuals)
         tolerance = float(os.getenv("IK_POSITION_TOLERANCE_M", "0.01"))
+        orientation_tolerance = float(
+            os.getenv("IK_ORIENTATION_TOLERANCE_RAD", "0.15")
+        )
         self.last_diagnostics = {
             "target_sequence": target.sequence,
             "status": (
@@ -298,6 +358,7 @@ class BimanualIk:
                 else (
                     "converged"
                     if maximum_residual <= tolerance
+                    and maximum_orientation_residual <= orientation_tolerance
                     else "residual_high"
                 )
             ),
@@ -311,7 +372,9 @@ class BimanualIk:
             "integration_dt_s": integration_dt,
             "damping": damping,
             "position_tolerance_m": tolerance,
+            "orientation_tolerance_rad": orientation_tolerance,
             "maximum_residual_m": maximum_residual,
+            "maximum_orientation_residual_rad": maximum_orientation_residual,
             "residuals": residuals,
             "solver_error": solver_error,
             "solution_delta_from_previous_rad": (
@@ -337,9 +400,13 @@ class BimanualIk:
             wrist = origin_rotation.T @ (
                 data.site_xpos[self.wrist_sites[side]] - origin_position
             )
+            wrist_rotation = origin_rotation.T @ data.site_xmat[
+                self.wrist_sites[side]
+            ].reshape(3, 3)
             arm: dict[str, object] = {
                 "elbow_position_m": elbow.tolist(),
                 "wrist_position_m": wrist.tolist(),
+                "wrist_rotation": wrist_rotation.reshape(-1).tolist(),
             }
             if target is not None:
                 desired = getattr(target, side)
@@ -351,6 +418,19 @@ class BimanualIk:
                         np.linalg.norm(
                             wrist - np.asarray(desired.wrist_position_m)
                         )
+                    )
+                if desired.wrist_rotation is not None:
+                    desired_rotation = np.asarray(
+                        desired.wrist_rotation
+                    ).reshape(3, 3)
+                    relative_rotation = desired_rotation.T @ wrist_rotation
+                    cosine = np.clip(
+                        (np.trace(relative_rotation) - 1.0) * 0.5,
+                        -1.0,
+                        1.0,
+                    )
+                    arm["wrist_orientation_error_rad"] = float(
+                        np.arccos(cosine)
                     )
             result[side] = arm
         return result
@@ -417,7 +497,7 @@ def simulation_worker(
     render_period = 1.0 / render_fps
     control_period = 1.0 / float(os.getenv("CONTROL_HZ", "60"))
     joint_smoothing_tau_s = float(
-        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0.12")
+        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0")
     )
     joint_smoothing_alpha = exponential_smoothing_alpha(
         control_period, joint_smoothing_tau_s

@@ -227,6 +227,8 @@
         <div class="stat"><span>Right elbow error</span><strong id="rightElbowError">—</strong></div>
         <div class="stat"><span>Left wrist error</span><strong id="leftError">—</strong></div>
         <div class="stat"><span>Right wrist error</span><strong id="rightError">—</strong></div>
+        <div class="stat"><span>Left orientation error</span><strong id="leftOrientationError">—</strong></div>
+        <div class="stat"><span>Right orientation error</span><strong id="rightOrientationError">—</strong></div>
       </section>
 
       <section class="status-row">
@@ -238,8 +240,8 @@
       <p class="note">
         Stand facing the camera with the landmarks required by the selected mode visible.
         Tracking engages automatically after every required keypoint remains confident for
-        two continuous seconds. Hand pose and end-effector orientation are currently ignored.
-        Low confidence holds the last robot pose.
+        two continuous seconds. Hand landmarks set the absolute end-effector orientation
+        whenever the selected mode includes the wrist. Low confidence holds the last robot pose.
       </p>
 
       <canvas id="capture"></canvas>
@@ -385,10 +387,14 @@
           const right = data.achieved?.right?.wrist_error_m;
           const leftElbow = data.achieved?.left?.elbow_error_m;
           const rightElbow = data.achieved?.right?.elbow_error_m;
+          const leftOrientation = data.achieved?.left?.wrist_orientation_error_rad;
+          const rightOrientation = data.achieved?.right?.wrist_orientation_error_rad;
           value("leftElbowError", leftElbow == null || data.mode === "end_effector" ? "—" : `${(leftElbow * 1000).toFixed(0)} mm`);
           value("rightElbowError", rightElbow == null || data.mode === "end_effector" ? "—" : `${(rightElbow * 1000).toFixed(0)} mm`);
           value("leftError", left == null ? "—" : `${(left * 1000).toFixed(0)} mm`);
           value("rightError", right == null ? "—" : `${(right * 1000).toFixed(0)} mm`);
+          value("leftOrientationError", leftOrientation == null ? "—" : `${(leftOrientation * 180 / Math.PI).toFixed(1)}°`);
+          value("rightOrientationError", rightOrientation == null ? "—" : `${(rightOrientation * 180 / Math.PI).toFixed(1)}°`);
           const physics = document.getElementById("physics");
           physics.textContent = `Physics ${data.simulation_time_s.toFixed(1)} s${data.stale ? " · holding" : " · tracking"}`;
           physics.className = `pill ${data.stale ? "warn" : "good"}`;
