@@ -167,7 +167,8 @@ def perception_worker(
     parent_pid = os.getppid()
     tracker, device, backend = _make_tracker()
     retargeter = SimccRetargeter(
-        confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35"))
+        confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35")),
+        smoothing_alpha=float(os.getenv("RETARGET_SMOOTHING_ALPHA", "0.55")),
     )
     log_path = Path(log_directory)
     log_path.mkdir(parents=True, exist_ok=True)

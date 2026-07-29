@@ -72,12 +72,20 @@ def hand_frame(points: np.ndarray, hand_start: int) -> np.ndarray:
 class SimccRetargeter:
     """Body-size-invariant bimanual retargeting with hand-frame calibration."""
 
-    def __init__(self, confidence_threshold: float = 0.35) -> None:
+    def __init__(
+        self,
+        confidence_threshold: float = 0.35,
+        smoothing_alpha: float = 0.55,
+    ) -> None:
         self.confidence_threshold = confidence_threshold
+        if not 0.0 < smoothing_alpha <= 1.0:
+            raise ValueError("smoothing_alpha must be in (0, 1]")
+        self.smoothing_alpha = smoothing_alpha
         self.hand_reference: dict[str, np.ndarray] = {}
         self.last_rotations = {
             side: HOME_WRIST_ROTATION.copy() for side in ("left", "right")
         }
+        self.last_directions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     @property
     def calibrated(self) -> bool:
@@ -85,6 +93,7 @@ class SimccRetargeter:
 
     def clear_calibration(self) -> None:
         self.hand_reference.clear()
+        self.last_directions.clear()
 
     def select_person(self, scores: np.ndarray) -> int:
         body_scores = np.asarray(scores)[:, :17]
@@ -128,6 +137,7 @@ class SimccRetargeter:
             self.hand_reference = {
                 side: frame.copy() for side, frame in frames.items()
             }
+            self.last_directions.clear()
 
         arms: dict[str, ArmTarget] = {}
         for side, indices in BODY.items():
@@ -136,6 +146,19 @@ class SimccRetargeter:
             wrist = robot_points[indices["wrist"]]
             upper_direction = _unit(elbow - shoulder)
             forearm_direction = _unit(wrist - elbow)
+            if side in self.last_directions and not calibrate:
+                previous_upper, previous_forearm = self.last_directions[side]
+                alpha = self.smoothing_alpha
+                upper_direction = _unit(
+                    alpha * upper_direction + (1.0 - alpha) * previous_upper
+                )
+                forearm_direction = _unit(
+                    alpha * forearm_direction + (1.0 - alpha) * previous_forearm
+                )
+            self.last_directions[side] = (
+                upper_direction.copy(),
+                forearm_direction.copy(),
+            )
             elbow_target = (
                 SHOULDER_POSITIONS[side] + UPPER_ARM_LENGTH_M * upper_direction
             )
@@ -144,6 +167,17 @@ class SimccRetargeter:
             reference = self.hand_reference.get(side, frames[side])
             delta = frames[side] @ reference.T
             wrist_rotation = delta @ HOME_WRIST_ROTATION
+            if self.calibrated and not calibrate:
+                alpha = self.smoothing_alpha
+                blended = (
+                    alpha * wrist_rotation
+                    + (1.0 - alpha) * self.last_rotations[side]
+                )
+                left, _, right = np.linalg.svd(blended)
+                wrist_rotation = left @ right
+                if np.linalg.det(wrist_rotation) < 0.0:
+                    left[:, -1] *= -1.0
+                    wrist_rotation = left @ right
             self.last_rotations[side] = wrist_rotation
             arm_confidence = float(
                 np.mean(

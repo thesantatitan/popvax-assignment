@@ -107,6 +107,10 @@ class BimanualIk:
 
     def solve(self, target: RobotTarget, seed_qpos: np.ndarray) -> np.ndarray:
         self.data.qpos[:] = seed_qpos
+        # Warm-start from the previous kinematic solution rather than the
+        # lagging, contact-affected physical state. Consecutive camera targets
+        # are close, so this avoids branch flips and local minima.
+        self.data.qpos[self.all_qpos_addresses] = self.previous_solution
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
         damping = float(os.getenv("IK_DAMPING", "0.035"))
