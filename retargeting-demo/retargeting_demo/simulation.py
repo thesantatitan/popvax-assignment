@@ -16,6 +16,7 @@ if Path("/dev/dxg").exists():
 import mink
 import mujoco
 import numpy as np
+import qpsolvers
 from PIL import Image
 
 from .contracts import RenderedFrame, RobotTarget
@@ -30,6 +31,43 @@ DEFAULT_MODEL_PATH = (
     / "cell.xml"
 )
 SIDES = ("left", "right")
+
+
+class ArmConfigurationLimit(mink.limits.Limit):
+    """Hard position bounds projected onto only the OpenArm arm joints."""
+
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        joint_ids: np.ndarray,
+        *,
+        gain: float,
+        margin_rad: float,
+    ) -> None:
+        if not 0.0 < gain <= 1.0:
+            raise ValueError("IK_LIMIT_GAIN must be in (0, 1]")
+        self.gain = gain
+        self.dof_addresses = model.jnt_dofadr[joint_ids].astype(np.int32)
+        self.qpos_addresses = model.jnt_qposadr[joint_ids].astype(np.int32)
+        self.lower = model.jnt_range[joint_ids, 0] + margin_rad
+        self.upper = model.jnt_range[joint_ids, 1] - margin_rad
+        if np.any(self.lower >= self.upper):
+            raise ValueError("IK_LIMIT_MARGIN leaves an empty arm-joint range")
+        self.projection = np.eye(model.nv)[self.dof_addresses]
+
+    def compute_qp_inequalities(
+        self,
+        configuration: mink.Configuration,
+        dt: float,
+    ) -> mink.limits.Constraint:
+        del dt
+        q = configuration.q[self.qpos_addresses]
+        maximum_step = self.gain * (self.upper - q)
+        minimum_step = self.gain * (q - self.lower)
+        return mink.limits.Constraint(
+            G=np.vstack([self.projection, -self.projection]),
+            h=np.hstack([maximum_step, minimum_step]),
+        )
 
 
 def _object_id(model: mujoco.MjModel, kind: mujoco.mjtObj, name: str) -> int:
@@ -100,43 +138,66 @@ class BimanualIk:
         self.all_qpos_addresses = np.concatenate(
             [self.qpos_addresses[side] for side in SIDES]
         )
+        self.all_dof_addresses = np.concatenate(
+            [self.dof_addresses[side] for side in SIDES]
+        )
+        arm_joint_ids = model.actuator_trnid[self.all_actuator_ids, 0]
         self.previous_solution = initial_data.qpos[self.all_qpos_addresses].copy()
         self.posture_task = mink.PostureTask(
             model, cost=float(os.getenv("IK_POSTURE_COST", "0.05"))
         )
-        arm_joint_names = {
-            mujoco.mj_id2name(
-                model,
-                mujoco.mjtObj.mjOBJ_JOINT,
-                int(joint_id),
-            )
-            for side in SIDES
-            for joint_id in model.actuator_trnid[self.actuator_ids[side], 0]
-        }
         velocity_limits: dict[str, float] = {}
         arm_velocity = float(os.getenv("IK_MAX_VELOCITY_RAD_S", "3.0"))
-        for joint_id in range(model.njnt):
-            if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_FREE:
-                continue
+        for joint_id in arm_joint_ids:
             name = mujoco.mj_id2name(
-                model, mujoco.mjtObj.mjOBJ_JOINT, joint_id
+                model, mujoco.mjtObj.mjOBJ_JOINT, int(joint_id)
             )
             if name is not None:
-                velocity_limits[name] = (
-                    arm_velocity if name in arm_joint_names else 0.0
-                )
+                velocity_limits[name] = arm_velocity
         self.limits = [
-            mink.ConfigurationLimit(
+            ArmConfigurationLimit(
                 model,
+                arm_joint_ids,
                 gain=float(os.getenv("IK_LIMIT_GAIN", "0.95")),
-                min_distance_from_limits=float(
-                    os.getenv("IK_LIMIT_MARGIN", "0.0")
-                ),
+                margin_rad=float(os.getenv("IK_LIMIT_MARGIN", "0.0")),
             ),
             mink.VelocityLimit(model, velocity_limits),
         ]
         self.solver = os.getenv("IK_QP_SOLVER", "daqp")
         self.last_diagnostics: dict[str, object] | None = None
+
+    def _solve_arm_velocity(
+        self,
+        tasks: list[mink.tasks.BaseTask],
+        integration_dt: float,
+        damping: float,
+    ) -> np.ndarray:
+        """Build with Mink, then solve a QP containing only the 14 arm DoFs."""
+
+        full = mink.build_ik(
+            self.configuration,
+            tasks,
+            dt=integration_dt,
+            damping=damping,
+            limits=self.limits,
+        )
+        indices = self.all_dof_addresses
+        reduced = qpsolvers.Problem(
+            P=full.P[indices][:, indices],
+            q=full.q[indices],
+            G=full.G[:, indices] if full.G is not None else None,
+            h=full.h,
+            A=full.A[:, indices] if full.A is not None else None,
+            b=full.b,
+            lb=full.lb[indices] if full.lb is not None else None,
+            ub=full.ub[indices] if full.ub is not None else None,
+        )
+        result = qpsolvers.solve_problem(reduced, solver=self.solver)
+        if not result.found or result.x is None:
+            raise mink.exceptions.NoSolutionFound(self.solver)
+        velocity = np.zeros(self.model.nv)
+        velocity[indices] = result.x / integration_dt
+        return velocity
 
     def _base_to_world(
         self, position: np.ndarray, rotation: np.ndarray
@@ -187,14 +248,10 @@ class BimanualIk:
         completed_iterations = 0
         for _ in range(iterations):
             try:
-                velocity = mink.solve_ik(
-                    self.configuration,
+                velocity = self._solve_arm_velocity(
                     tasks,
-                    dt=integration_dt,
-                    solver=self.solver,
-                    damping=damping,
-                    safety_break=False,
-                    limits=self.limits,
+                    integration_dt,
+                    damping,
                 )
             except Exception as exc:  # noqa: BLE001
                 solver_error = str(exc)
@@ -245,6 +302,10 @@ class BimanualIk:
                 )
             ),
             "solver": f"mink:{self.solver}",
+            "decision_dofs": len(self.all_dof_addresses),
+            "excluded_dofs": int(
+                self.model.nv - len(self.all_dof_addresses)
+            ),
             "iterations": completed_iterations,
             "requested_iterations": iterations,
             "integration_dt_s": integration_dt,

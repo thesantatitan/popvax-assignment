@@ -8,6 +8,7 @@ dependencies = [
     "mink>=0.0.13,<0.1",
     "mujoco==3.6.0",
     "pillow==11.3.0",
+    "qpsolvers[daqp]>=4.8,<5",
     "rtmlib==0.0.15",
     "uvicorn[standard]>=0.34,<1",
 ]

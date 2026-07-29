@@ -11,10 +11,11 @@ The runtime uses three independent OS processes:
    targets, exponentially filters the normalized Cartesian limb directions,
    renders both 2D and inset 3D pose views, and logs `RobotTarget` records.
 3. MuJoCo and Mink run continuity-regularized differential QP IK with hard joint
-   position and velocity limits, write filtered joint targets to `data.ctrl`,
-   step physics at the model's 1 kHz timestep, and render independently. The
-   model's actuated vertical lifter is continuously commanded to the top of its
-   range (`0.3 m`).
+   position and velocity limits on only the 14 arm joints, write filtered joint
+   targets to `data.ctrl`, step physics at the model's 1 kHz timestep, and render
+   independently. The lifter and grippers are fixed kinematic inputs, not IK
+   variables. The model's actuated vertical lifter is continuously commanded to
+   the top of its range (`0.3 m`).
 
 Every cross-process queue has capacity one. Old camera frames, targets, and renders
 are dropped instead of adding latency.

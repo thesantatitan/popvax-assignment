@@ -5,7 +5,12 @@ import numpy as np
 import pytest
 
 from retargeting_demo.contracts import ArmTarget, RobotTarget
-from retargeting_demo.simulation import BimanualIk, _initialize_model
+from retargeting_demo.simulation import (
+    ArmConfigurationLimit,
+    BimanualIk,
+    _initialize_model,
+    _lifter_top_command,
+)
 
 MODEL_PATH = Path(__file__).resolve().parents[1] / "vendor/openarm-v2/cell.xml"
 
@@ -90,3 +95,45 @@ def test_mink_reduces_position_error_without_moving_non_arm_joints() -> None:
         data.qpos[non_arm_qpos],
         atol=1e-12,
     )
+
+
+def test_lifter_overshoot_is_excluded_from_mink_arm_limits() -> None:
+    model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
+    data = mujoco.MjData(model)
+    _initialize_model(model, data)
+    lifter_actuator, lifter_top = _lifter_top_command(model)
+    lifter_joint = model.actuator_trnid[lifter_actuator, 0]
+    lifter_qpos = model.jnt_qposadr[lifter_joint]
+    data.qpos[lifter_qpos] = lifter_top + 1e-5
+    mujoco.mj_forward(model, data)
+    ik = BimanualIk(model, data)
+    achieved = ik.achieved_state(data, None)
+    target = RobotTarget(
+        sequence=44,
+        capture_time_ns=1,
+        inference_time_ns=2,
+        mode="both",
+        camera_intrinsics_enabled=False,
+        camera_intrinsics_source=None,
+        estimated_root_depth_m=None,
+        left=ArmTarget(
+            tuple(achieved["left"]["elbow_position_m"]),
+            tuple(achieved["left"]["wrist_position_m"]),
+            1.0,
+        ),
+        right=ArmTarget(
+            tuple(achieved["right"]["elbow_position_m"]),
+            tuple(achieved["right"]["wrist_position_m"]),
+            1.0,
+        ),
+    )
+
+    ik.solve(target, data.qpos)
+
+    assert isinstance(ik.limits[0], ArmConfigurationLimit)
+    assert ik.last_diagnostics is not None
+    assert ik.last_diagnostics["solver_error"] is None
+    assert ik.last_diagnostics["decision_dofs"] == 14
+    assert ik.last_diagnostics["excluded_dofs"] == model.nv - 14
+    assert data.qpos[lifter_qpos] == pytest.approx(lifter_top + 1e-5)
+    assert ik.data.qpos[lifter_qpos] == pytest.approx(lifter_top + 1e-5)

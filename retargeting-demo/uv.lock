@@ -411,6 +411,7 @@ dependencies = [
     { name = "mink" },
     { name = "mujoco" },
     { name = "pillow" },
+    { name = "qpsolvers", extra = ["daqp"] },
     { name = "rtmlib" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -437,6 +438,7 @@ requires-dist = [
     { name = "onnxruntime-gpu", marker = "sys_platform == 'linux' and extra == 'gpu'", specifier = "==1.26.0" },
     { name = "pillow", specifier = "==11.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4,<9" },
+    { name = "qpsolvers", extras = ["daqp"], specifier = ">=4.8,<5" },
     { name = "rtmlib", specifier = "==0.0.15" },
     { name = "tensorrt-bindings", marker = "sys_platform == 'linux' and extra == 'tensorrt'", specifier = "==8.6.1", index = "https://pypi.nvidia.com/" },
     { name = "tensorrt-libs", marker = "sys_platform == 'linux' and extra == 'tensorrt'", specifier = "==8.6.1", index = "https://pypi.nvidia.com/" },
