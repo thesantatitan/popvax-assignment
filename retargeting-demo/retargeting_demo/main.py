@@ -30,7 +30,7 @@ def main() -> None:
     args = parse_args()
     context = mp.get_context("spawn")
     stop_event = context.Event()
-    calibrate_event = context.Event()
+    tracking_reset_event = context.Event()
     engaged_event = context.Event()
     frame_queue = context.Queue(maxsize=1)
     target_queue = context.Queue(maxsize=1)
@@ -48,7 +48,7 @@ def main() -> None:
             target_queue,
             pose_frame_queue,
             perception_telemetry_queue,
-            calibrate_event,
+            tracking_reset_event,
             engaged_event,
             stop_event,
             str(args.log_directory),
@@ -79,7 +79,7 @@ def main() -> None:
         perception_telemetry_queue=perception_telemetry_queue,
         simulation_telemetry_queue=simulation_telemetry_queue,
         camera_queue=camera_queue,
-        calibrate_event=calibrate_event,
+        tracking_reset_event=tracking_reset_event,
         engaged_event=engaged_event,
     )
     app = create_app(runtime)

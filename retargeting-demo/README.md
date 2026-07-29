@@ -8,7 +8,7 @@ The runtime uses three independent OS processes:
 
 1. FastAPI receives browser JPEGs and streams both rendered views.
 2. RTMW3D decodes SimCC landmarks, constructs body-size-invariant elbow/wrist
-   targets and calibrated hand orientations, and logs `RobotTarget` records.
+   targets and absolute hand orientations, and logs `RobotTarget` records.
 3. MuJoCo runs damped-least-squares IK, writes joint targets to `data.ctrl`, steps
    physics at the model's 1 kHz timestep, and renders independently.
 
@@ -63,11 +63,9 @@ camera context, and the browser asks for that Mac's camera permission.
 
 1. Select **Start camera** and allow camera access.
 2. Face the camera with shoulders, elbows, wrists, and both hands visible.
-3. Hold a comfortable neutral pose with open hands.
-4. Select **Calibrate & engage** and remain still until the status becomes
-   `Calibrated · engaged`.
-5. Move within the robot's reach. If hand orientation drifts or the operator
-   changes, recalibrate.
+3. Keep every required keypoint confidently visible for two continuous seconds.
+4. Tracking engages automatically. If confidence drops, the robot holds its last
+   pose and requires another continuous two-second confident interval.
 
 The simulation holds its last actuator command if targets become stale. Closing the
 browser or selecting **Stop** disengages new target application.
@@ -80,10 +78,10 @@ browser or selecting **Stop** disengages new target application.
 - RTMW3D decoded SimCC coordinates supply relative shoulder-elbow-wrist directions.
 - Human segment magnitude is discarded; directions are scaled to the OpenArm's
   measured 0.220 m upper arm and 0.216 m forearm.
-- Calibration maps the operator's neutral limb directions onto the collision-safe
-  OpenArm home configuration; later targets apply relative segment rotations.
-- Wrist orientation comes from the wrist and four MCP landmarks. Calibration maps
-  the neutral human hand frames to the OpenArm home tool frames.
+- Limb directions map directly from camera coordinates into the robot base frame;
+  there is no neutral-pose calibration or relative-motion offset.
+- Wrist orientation comes directly from the wrist and four MCP landmarks using a
+  fixed palm-frame-to-OpenArm-tool-frame convention.
 - IK minimizes elbow position, end-effector position, and end-effector orientation
   with analytic MuJoCo Jacobians and joint-limit clipping.
 
@@ -100,4 +98,5 @@ uv run python verify_runtime.py
 
 Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`,
 `IK_ELBOW_WEIGHT`, `IK_ORIENTATION_WEIGHT`, `RETARGET_CONFIDENCE`,
-`RETARGET_SMOOTHING_ALPHA`, `RTMW3D_DET_FREQUENCY`, and `OPENARM_MODEL_PATH`.
+`RETARGET_CONFIDENCE_SECONDS`, `RETARGET_SMOOTHING_ALPHA`,
+`RTMW3D_DET_FREQUENCY`, and `OPENARM_MODEL_PATH`.

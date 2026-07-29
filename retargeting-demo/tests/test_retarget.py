@@ -4,6 +4,7 @@ from retargeting_demo.retarget import (
     BODY,
     CAMERA_TO_ROBOT,
     FOREARM_LENGTH_M,
+    HAND_TO_END_EFFECTOR,
     UPPER_ARM_LENGTH_M,
     SimccRetargeter,
     hand_frame,
@@ -57,9 +58,10 @@ def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
         inference_time_ns=200,
         simcc=simcc,
         scores=scores,
-        calibrate=True,
     )
+    robot_points = simcc_to_camera_points(simcc[0]) @ CAMERA_TO_ROBOT.T
     for side in ("left", "right"):
+        indices = BODY[side]
         arm = getattr(target, side)
         shoulder = np.array([0.0, 0.1535 if side == "left" else -0.1535, 0.0])
         elbow = np.asarray(arm.elbow_position_m)
@@ -67,16 +69,25 @@ def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
         rotation = np.asarray(arm.wrist_rotation).reshape(3, 3)
         assert np.isclose(np.linalg.norm(elbow - shoulder), UPPER_ARM_LENGTH_M)
         assert np.isclose(np.linalg.norm(wrist - elbow), FOREARM_LENGTH_M)
+        measured_upper = (
+            robot_points[indices["elbow"]] - robot_points[indices["shoulder"]]
+        )
+        measured_upper /= np.linalg.norm(measured_upper)
+        measured_forearm = (
+            robot_points[indices["wrist"]] - robot_points[indices["elbow"]]
+        )
+        measured_forearm /= np.linalg.norm(measured_forearm)
         np.testing.assert_allclose(
-            elbow,
-            shoulder + np.array([0.0, 0.0, -UPPER_ARM_LENGTH_M]),
-            atol=1e-7,
+            elbow, shoulder + UPPER_ARM_LENGTH_M * measured_upper
         )
         np.testing.assert_allclose(
-            wrist,
-            elbow + np.array([FOREARM_LENGTH_M, 0.0, 0.0]),
-            atol=1e-7,
+            wrist, elbow + FOREARM_LENGTH_M * measured_forearm
         )
+        expected_rotation = (
+            hand_frame(robot_points, indices["hand_start"])
+            @ HAND_TO_END_EFFECTOR
+        )
+        np.testing.assert_allclose(rotation, expected_rotation)
         np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-7)
 
 

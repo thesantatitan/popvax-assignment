@@ -14,6 +14,7 @@ import numpy as np
 import onnxruntime as ort
 from rtmlib import YOLOX, Custom, Wholebody3d, draw_skeleton
 
+from .confidence import ContinuousConfidenceGate
 from .contracts import BrowserFrame, RenderedFrame
 from .ipc import configure_parent_death_signal, drain_latest, put_latest
 from .retarget import SimccRetargeter, target_record
@@ -157,7 +158,7 @@ def perception_worker(
     target_queue,
     pose_frame_queue,
     telemetry_queue,
-    calibrate_event,
+    tracking_reset_event,
     engaged_event,
     stop_event,
     log_directory: str,
@@ -170,24 +171,67 @@ def perception_worker(
         confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35")),
         smoothing_alpha=float(os.getenv("RETARGET_SMOOTHING_ALPHA", "0.55")),
     )
+    gate = ContinuousConfidenceGate(
+        required_seconds=float(os.getenv("RETARGET_CONFIDENCE_SECONDS", "2.0"))
+    )
+    gate_state = gate.reset()
     log_path = Path(log_directory)
     log_path.mkdir(parents=True, exist_ok=True)
     target_log = log_path / f"targets-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     last_tick = time.perf_counter()
+    last_input_wall: float | None = None
+    timeout_reported = False
     smoothed_fps = 0.0
     with target_log.open("a", encoding="utf-8", buffering=1) as output:
         while not stop_event.is_set() and os.getppid() == parent_pid:
+            if tracking_reset_event.is_set():
+                tracking_reset_event.clear()
+                engaged_event.clear()
+                gate_state = gate.reset()
             incoming = drain_latest(frame_queue)
             if incoming is None:
+                if (
+                    last_input_wall is not None
+                    and time.perf_counter() - last_input_wall > 0.5
+                    and not timeout_reported
+                ):
+                    gate_state = gate.update(False, time.monotonic_ns())
+                    engaged_event.clear()
+                    timeout_reported = True
+                    put_latest(
+                        telemetry_queue,
+                        {
+                            "type": "perception",
+                            "people": 0,
+                            "fps": round(smoothed_fps, 2),
+                            "processing_ms": None,
+                            "device": device,
+                            "backend": backend,
+                            "engaged": False,
+                            "tracking_state": gate_state.state,
+                            "confidence_seconds": 0.0,
+                            "confidence_required_seconds": gate_state.required_seconds,
+                            "minimum_confidence": 0.0,
+                            "mean_confidence": 0.0,
+                            "error": "Camera frames timed out; holding the last pose.",
+                        },
+                    )
                 time.sleep(0.002)
                 continue
             assert isinstance(incoming, BrowserFrame)
+            last_input_wall = time.perf_counter()
+            timeout_reported = False
             started = time.perf_counter()
             encoded = np.frombuffer(incoming.jpeg, dtype=np.uint8)
             frame = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
             if frame is None:
                 continue
 
+            keypoints_2d = np.empty((0, 133, 2), dtype=np.float32)
+            scores = np.empty((0, 133), dtype=np.float32)
+            people = 0
+            minimum_confidence = 0.0
+            mean_confidence = 0.0
             try:
                 result = tracker(frame)
                 if not isinstance(result, tuple) or len(result) != 4:
@@ -197,27 +241,34 @@ def perception_worker(
                 simcc = np.asarray(simcc_raw)
                 keypoints_2d = np.asarray(keypoints_2d_raw)
                 people = len(scores) if scores.ndim == 2 else 0
-                calibration_requested = calibrate_event.is_set()
+                minimum_confidence, mean_confidence = (
+                    retargeter.confidence_summary(scores)
+                )
                 target = retargeter.make_target(
                     sequence=incoming.sequence,
                     capture_time_ns=incoming.capture_time_ns,
                     inference_time_ns=time.monotonic_ns(),
                     simcc=simcc,
                     scores=scores,
-                    calibrate=calibration_requested,
                 )
-                if calibration_requested:
-                    calibrate_event.clear()
-                if engaged_event.is_set() and retargeter.calibrated:
+                gate_state = gate.update(True, time.monotonic_ns())
+                if gate_state.ready:
+                    engaged_event.set()
                     put_latest(target_queue, target)
-                    output.write(json.dumps(target_record(target), separators=(",", ":")) + "\n")
+                    output.write(
+                        json.dumps(
+                            target_record(target), separators=(",", ":")
+                        )
+                        + "\n"
+                    )
+                else:
+                    engaged_event.clear()
                 error = None
-            # Model/runtime failures are reported to the browser while this
-            # long-lived worker stays available for the next camera frame.
+            # Model/runtime and low-confidence failures are reported while
+            # this long-lived worker remains available for the next frame.
             except Exception as exc:  # noqa: BLE001
-                keypoints_2d = np.empty((0, 133, 2), dtype=np.float32)
-                scores = np.empty((0, 133), dtype=np.float32)
-                people = 0
+                gate_state = gate.update(False, time.monotonic_ns())
+                engaged_event.clear()
                 error = str(exc)
 
             now = time.perf_counter()
@@ -229,9 +280,17 @@ def perception_worker(
                 else 0.9 * smoothed_fps + 0.1 * instant_fps
             )
             processing_ms = (now - started) * 1000.0
-            mode = "ENGAGED" if engaged_event.is_set() and retargeter.calibrated else "READY"
-            if calibrate_event.is_set():
-                mode = "HOLD NEUTRAL FOR CALIBRATION"
+            if gate_state.state == "tracking":
+                mode = "TRACKING"
+            elif gate_state.state in {"acquiring", "reacquiring"}:
+                mode = (
+                    f"CONFIDENCE {gate_state.continuous_seconds:.1f}/"
+                    f"{gate_state.required_seconds:.1f}s"
+                )
+            elif gate_state.state == "holding":
+                mode = "LOW CONFIDENCE - HOLDING"
+            else:
+                mode = "WAITING FOR POSE"
             status = (
                 f"RTMW3D {backend} | {mode} | {smoothed_fps:.1f} FPS | "
                 f"{processing_ms:.0f} ms"
@@ -251,8 +310,14 @@ def perception_worker(
                     "processing_ms": round(processing_ms, 1),
                     "device": device,
                     "backend": backend,
-                    "calibrated": retargeter.calibrated,
-                    "engaged": engaged_event.is_set(),
+                    "engaged": gate_state.ready,
+                    "tracking_state": gate_state.state,
+                    "confidence_seconds": round(
+                        gate_state.continuous_seconds, 2
+                    ),
+                    "confidence_required_seconds": gate_state.required_seconds,
+                    "minimum_confidence": round(minimum_confidence, 3),
+                    "mean_confidence": round(mean_confidence, 3),
                     "error": error,
                 },
             )

@@ -27,7 +27,7 @@ class Runtime:
     perception_telemetry_queue: object
     simulation_telemetry_queue: object
     camera_queue: object
-    calibrate_event: object
+    tracking_reset_event: object
     engaged_event: object
 
 
@@ -130,12 +130,9 @@ def create_app(runtime: Runtime) -> FastAPI:
                 continue
             command = json.loads(text)
             action = command.get("action")
-            if action == "calibrate":
-                controller = websocket
-                runtime.engaged_event.set()
-                runtime.calibrate_event.set()
-            elif action == "disengage" and controller is websocket:
+            if action == "disengage" and controller is websocket:
                 runtime.engaged_event.clear()
+                runtime.tracking_reset_event.set()
             elif action in {"rotate", "pan", "zoom", "reset"}:
                 put_latest(
                     runtime.camera_queue,
@@ -178,6 +175,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         finally:
             if controller is websocket:
                 runtime.engaged_event.clear()
+                runtime.tracking_reset_event.set()
                 controller = None
             hub.unregister(client_channel)
             receiver.cancel()

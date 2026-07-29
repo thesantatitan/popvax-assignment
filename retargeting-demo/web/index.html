@@ -45,7 +45,6 @@
         color: #06110e; font: inherit; font-weight: 800; cursor: pointer;
       }
       button.secondary { background: #273447; color: var(--text); }
-      button.calibrate { background: var(--blue); }
       button:disabled { cursor: not-allowed; opacity: .45; }
       #message { color: var(--muted); margin-left: 4px; }
       .views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -100,7 +99,6 @@
 
       <section class="toolbar">
         <button id="start">Start camera</button>
-        <button id="calibrate" class="calibrate" disabled>Calibrate &amp; engage</button>
         <button id="stop" class="secondary" disabled>Stop</button>
         <button id="resetView" class="secondary">Reset sim view</button>
         <span id="message">Start the camera on this device.</span>
@@ -141,13 +139,13 @@
 
       <section class="status-row">
         <span id="model" class="pill">Model loading</span>
-        <span id="calibration" class="pill warn">Not calibrated</span>
+        <span id="tracking" class="pill warn">Waiting for confident pose</span>
         <span id="physics" class="pill warn">Physics starting</span>
       </section>
       <p class="note">
-        Stand facing the camera with both hands visible. Hold a comfortable neutral pose,
-        then select Calibrate &amp; engage. Camera pixels stay in this browser until they are
-        sent to the inference process on the server.
+        Stand facing the camera with both shoulders, elbows, wrists, and hands visible.
+        Tracking engages automatically after every required keypoint remains confident for
+        two continuous seconds. Low confidence holds the last robot pose.
       </p>
 
       <canvas id="capture"></canvas>
@@ -160,7 +158,6 @@
       const poseImage = document.getElementById("pose");
       const simImage = document.getElementById("simulation");
       const startButton = document.getElementById("start");
-      const calibrateButton = document.getElementById("calibrate");
       const stopButton = document.getElementById("stop");
       const connection = document.getElementById("connection");
       const message = document.getElementById("message");
@@ -184,11 +181,27 @@
           value("poseFps", data.fps == null ? "—" : `${data.fps} FPS`);
           value("inference", data.processing_ms == null ? "—" : `${data.processing_ms} ms`);
           value("model", `${data.backend} · ${data.device}`);
-          const calibration = document.getElementById("calibration");
-          calibration.textContent = data.engaged && data.calibrated ? "Calibrated · engaged" : (data.calibrated ? "Calibrated · paused" : "Not calibrated");
-          calibration.className = `pill ${data.engaged && data.calibrated ? "good" : "warn"}`;
-          calibrateButton.disabled = !stream || data.people < 1;
-          if (data.error) setMessage(`Pose: ${data.error}`);
+          const tracking = document.getElementById("tracking");
+          const minimum = data.minimum_confidence == null ? "—" : data.minimum_confidence.toFixed(2);
+          if (data.tracking_state === "tracking") {
+            tracking.textContent = `Tracking engaged · minimum confidence ${minimum}`;
+            tracking.className = "pill good";
+            setMessage("Absolute pose tracking is active.");
+          } else if (data.tracking_state === "acquiring" || data.tracking_state === "reacquiring") {
+            const elapsed = Number(data.confidence_seconds ?? 0).toFixed(1);
+            const required = Number(data.confidence_required_seconds ?? 2).toFixed(1);
+            tracking.textContent = `Confident pose ${elapsed}/${required} s · minimum ${minimum}`;
+            tracking.className = "pill warn";
+            setMessage("Keep every required upper-body and hand keypoint visible.");
+          } else if (data.tracking_state === "holding") {
+            tracking.textContent = `Low confidence · holding last pose · minimum ${minimum}`;
+            tracking.className = "pill bad";
+            setMessage(data.error ? `Pose: ${data.error}` : "Tracking paused until confidence is stable for two seconds.");
+          } else {
+            tracking.textContent = "Waiting for confident pose";
+            tracking.className = "pill warn";
+            if (data.error) setMessage(`Pose: ${data.error}`);
+          }
         } else if (data.type === "simulation") {
           value("control", `${data.control_hz} Hz`);
           value("targetAge", data.target_age_ms == null ? "—" : `${Math.round(data.target_age_ms)} ms`);
@@ -246,8 +259,10 @@
         document.getElementById("poseEmpty").hidden = false;
         startButton.disabled = false;
         stopButton.disabled = true;
-        calibrateButton.disabled = true;
         value("cameraState", "inactive");
+        const tracking = document.getElementById("tracking");
+        tracking.textContent = "Waiting for confident pose";
+        tracking.className = "pill warn";
         setMessage("Start the camera on this device.");
       }
       function connectSocket() {
@@ -257,7 +272,7 @@
         socket.onopen = () => {
           connection.textContent = "Pipeline connected";
           connection.className = "connection online";
-          setMessage(stream ? "Keep both arms and hands visible, then calibrate." : "Start the camera on this device.");
+          setMessage(stream ? "Keep all required upper-body and hand keypoints visible." : "Start the camera on this device.");
         };
         socket.onmessage = receiveMessage;
         socket.onerror = () => setMessage("WebSocket error. Check the server and SSH tunnel.");
@@ -287,7 +302,7 @@
           canvas.height = Math.round(canvas.width * (video.videoHeight || 480) / (video.videoWidth || 640));
           value("cameraState", `${canvas.width}×${canvas.height}`);
           connectSocket();
-          setMessage("Keep both arms and hands visible, then calibrate.");
+          setMessage("Acquiring a high-confidence pose for two continuous seconds…");
           requestAnimationFrame(captureNext);
         } catch (error) {
           stop();
@@ -296,11 +311,6 @@
       }
       startButton.addEventListener("click", start);
       stopButton.addEventListener("click", stop);
-      calibrateButton.addEventListener("click", () => {
-        sendCommand({ action: "calibrate" });
-        calibrateButton.disabled = true;
-        setMessage("Hold the neutral pose with both hands visible…");
-      });
       document.getElementById("resetView").addEventListener("click", () => sendCommand({ action: "reset" }));
       simImage.addEventListener("contextmenu", event => event.preventDefault());
       simImage.addEventListener("pointerdown", event => {
