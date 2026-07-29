@@ -10,9 +10,9 @@ The runtime uses three independent OS processes:
 2. RTMW3D decodes SimCC landmarks, constructs body-size-invariant elbow/wrist
    targets, exponentially filters the normalized Cartesian limb directions,
    renders both 2D and inset 3D pose views, and logs `RobotTarget` records.
-3. MuJoCo runs damped-least-squares IK, writes joint targets to `data.ctrl`, steps
-   physics at the model's 1 kHz timestep, and renders independently. IK joint
-   solutions pass through a second exponential filter before `data.ctrl`. The
+3. MuJoCo and Mink run continuity-regularized differential QP IK with hard joint
+   position and velocity limits, write filtered joint targets to `data.ctrl`,
+   step physics at the model's 1 kHz timestep, and render independently. The
    model's actuated vertical lifter is continuously commanded to the top of its
    range (`0.3 m`).
 
@@ -125,8 +125,9 @@ new profiles after calibrating a camera.
   Jacobian.
 - **Elbow + end effector** stacks both position residuals and Jacobians.
 - The normalized Cartesian limb directions are exponentially filtered before IK.
-  IK applies joint-limit clipping, and its solution is exponentially filtered
-  again before reaching the position actuators.
+  Mink solves both arms together with configuration and velocity constraints plus
+  a previous-posture objective. Its solution is exponentially filtered again
+  before reaching the position actuators.
 
 Intermediate targets, the selected person's decoded `keypoints_simcc`, and that
 person's detection index are logged to `logs/targets-*.jsonl`; achieved elbow/wrist
@@ -141,6 +142,8 @@ uv run python verify_runtime.py
 ```
 
 Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`,
+`IK_POSTURE_COST`, `IK_MAX_VELOCITY_RAD_S`, `IK_TASK_GAIN`,
+`IK_INTEGRATION_DT_S`, `IK_QP_SOLVER`,
 `RETARGET_SMOOTHING_TAU_S`, `ROBOT_COMMAND_SMOOTHING_TAU_S`,
 `ROBOT_COMMAND_MAX_SPEED_RAD_S`, `RETARGET_CONFIDENCE`,
 `RETARGET_CONFIDENCE_SECONDS`, `RTMW3D_DET_FREQUENCY`, and

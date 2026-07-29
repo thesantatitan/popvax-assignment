@@ -13,6 +13,7 @@ os.environ.setdefault("MUJOCO_GL", "egl" if sys.platform.startswith("linux") els
 if Path("/dev/dxg").exists():
     os.environ.setdefault("GALLIUM_DRIVER", "d3d12")
 
+import mink
 import mujoco
 import numpy as np
 from PIL import Image
@@ -39,12 +40,12 @@ def _object_id(model: mujoco.MjModel, kind: mujoco.mjtObj, name: str) -> int:
 
 
 class BimanualIk:
-    """Small damped-least-squares solver using MuJoCo analytic Jacobians."""
+    """Continuity-regularized bimanual differential IK using Mink."""
 
     def __init__(self, model: mujoco.MjModel, initial_data: mujoco.MjData) -> None:
         self.model = model
-        self.data = mujoco.MjData(model)
-        self.data.qpos[:] = initial_data.qpos
+        self.configuration = mink.Configuration(model, q=initial_data.qpos.copy())
+        self.data = self.configuration.data
         self.origin_site = _object_id(
             model, mujoco.mjtObj.mjOBJ_SITE, "arm_origin"
         )
@@ -53,6 +54,8 @@ class BimanualIk:
         self.dof_addresses: dict[str, np.ndarray] = {}
         self.elbow_bodies: dict[str, int] = {}
         self.wrist_sites: dict[str, int] = {}
+        self.elbow_tasks: dict[str, mink.FrameTask] = {}
+        self.wrist_tasks: dict[str, mink.FrameTask] = {}
         for side in SIDES:
             actuators = np.array(
                 [
@@ -75,6 +78,22 @@ class BimanualIk:
             self.wrist_sites[side] = _object_id(
                 model, mujoco.mjtObj.mjOBJ_SITE, f"{side}_ee_control_point"
             )
+            self.elbow_tasks[side] = mink.FrameTask(
+                frame_name=f"openarm_{side}_link4",
+                frame_type="body",
+                position_cost=float(os.getenv("IK_ELBOW_COST", "1.0")),
+                orientation_cost=0.0,
+                gain=float(os.getenv("IK_TASK_GAIN", "0.7")),
+                lm_damping=float(os.getenv("IK_LM_DAMPING", "1e-4")),
+            )
+            self.wrist_tasks[side] = mink.FrameTask(
+                frame_name=f"{side}_ee_control_point",
+                frame_type="site",
+                position_cost=float(os.getenv("IK_WRIST_COST", "1.0")),
+                orientation_cost=0.0,
+                gain=float(os.getenv("IK_TASK_GAIN", "0.7")),
+                lm_damping=float(os.getenv("IK_LM_DAMPING", "1e-4")),
+            )
         self.all_actuator_ids = np.concatenate(
             [self.actuator_ids[side] for side in SIDES]
         )
@@ -82,6 +101,41 @@ class BimanualIk:
             [self.qpos_addresses[side] for side in SIDES]
         )
         self.previous_solution = initial_data.qpos[self.all_qpos_addresses].copy()
+        self.posture_task = mink.PostureTask(
+            model, cost=float(os.getenv("IK_POSTURE_COST", "0.05"))
+        )
+        arm_joint_names = {
+            mujoco.mj_id2name(
+                model,
+                mujoco.mjtObj.mjOBJ_JOINT,
+                int(joint_id),
+            )
+            for side in SIDES
+            for joint_id in model.actuator_trnid[self.actuator_ids[side], 0]
+        }
+        velocity_limits: dict[str, float] = {}
+        arm_velocity = float(os.getenv("IK_MAX_VELOCITY_RAD_S", "3.0"))
+        for joint_id in range(model.njnt):
+            if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_FREE:
+                continue
+            name = mujoco.mj_id2name(
+                model, mujoco.mjtObj.mjOBJ_JOINT, joint_id
+            )
+            if name is not None:
+                velocity_limits[name] = (
+                    arm_velocity if name in arm_joint_names else 0.0
+                )
+        self.limits = [
+            mink.ConfigurationLimit(
+                model,
+                gain=float(os.getenv("IK_LIMIT_GAIN", "0.95")),
+                min_distance_from_limits=float(
+                    os.getenv("IK_LIMIT_MARGIN", "0.0")
+                ),
+            ),
+            mink.VelocityLimit(model, velocity_limits),
+        ]
+        self.solver = os.getenv("IK_QP_SOLVER", "daqp")
         self.last_diagnostics: dict[str, object] | None = None
 
     def _base_to_world(
@@ -96,72 +150,57 @@ class BimanualIk:
 
     def solve(self, target: RobotTarget, seed_qpos: np.ndarray) -> np.ndarray:
         previous_solution = self.previous_solution.copy()
-        self.data.qpos[:] = seed_qpos
-        # Warm-start from the previous kinematic solution rather than the
-        # lagging, contact-affected physical state. Consecutive camera targets
-        # are close, so this avoids branch flips and local minima.
-        self.data.qpos[self.all_qpos_addresses] = self.previous_solution
-        self.data.qvel[:] = 0.0
-        mujoco.mj_forward(self.model, self.data)
-        damping = float(os.getenv("IK_DAMPING", "0.035"))
+        configuration_q = np.asarray(seed_qpos).copy()
+        # Preserve the current non-arm state, but warm-start both arms from the
+        # previous continuous Mink solution rather than lagging physical qpos.
+        configuration_q[self.all_qpos_addresses] = previous_solution
+        self.configuration.update(configuration_q)
+        self.posture_task.set_target_from_configuration(self.configuration)
+        damping = float(os.getenv("IK_DAMPING", "1e-6"))
         iterations = int(os.getenv("IK_ITERATIONS", "25"))
-
-        for _ in range(iterations):
-            for side in SIDES:
-                arm_target = getattr(target, side)
-                mode = target.mode
-                errors: list[np.ndarray] = []
-                jacobians: list[np.ndarray] = []
-                elbow_body = self.elbow_bodies[side]
-                wrist_site = self.wrist_sites[side]
-                dofs = self.dof_addresses[side]
-
-                if mode in {"elbow", "both"}:
-                    elbow_target, _ = self._base_to_world(
-                        np.asarray(arm_target.elbow_position_m), np.eye(3)
-                    )
-                    jac_elbow = np.zeros((3, self.model.nv))
-                    mujoco.mj_jacBody(
-                        self.model, self.data, jac_elbow, None, elbow_body
-                    )
-                    errors.append(elbow_target - self.data.xpos[elbow_body])
-                    jacobians.append(jac_elbow[:, dofs])
-                if mode in {"end_effector", "both"}:
-                    if arm_target.wrist_position_m is None:
-                        raise ValueError(
-                            f"{mode} target is missing wrist_position_m"
-                        )
-                    wrist_target, _ = self._base_to_world(
-                        np.asarray(arm_target.wrist_position_m), np.eye(3)
-                    )
-                    jac_wrist = np.zeros((3, self.model.nv))
-                    mujoco.mj_jacSite(
-                        self.model,
-                        self.data,
-                        jac_wrist,
-                        None,
-                        wrist_site,
-                    )
-                    errors.append(
-                        wrist_target - self.data.site_xpos[wrist_site]
-                    )
-                    jacobians.append(jac_wrist[:, dofs])
-                error = np.concatenate(errors)
-                jacobian = np.vstack(jacobians)
-                system = jacobian @ jacobian.T
-                system.flat[:: system.shape[0] + 1] += damping**2
-                delta = jacobian.T @ np.linalg.solve(system, error)
-                delta = np.clip(delta, -0.10, 0.10)
-                qpos_addresses = self.qpos_addresses[side]
-                self.data.qpos[qpos_addresses] += delta
-                joint_ids = self.model.actuator_trnid[self.actuator_ids[side], 0]
-                limits = self.model.jnt_range[joint_ids]
-                self.data.qpos[qpos_addresses] = np.clip(
-                    self.data.qpos[qpos_addresses],
-                    limits[:, 0] + 0.01,
-                    limits[:, 1] - 0.01,
+        integration_dt = float(os.getenv("IK_INTEGRATION_DT_S", "0.02"))
+        tasks: list[mink.tasks.BaseTask] = [self.posture_task]
+        for side in SIDES:
+            arm_target = getattr(target, side)
+            if target.mode in {"elbow", "both"}:
+                elbow_target, _ = self._base_to_world(
+                    np.asarray(arm_target.elbow_position_m), np.eye(3)
                 )
-                mujoco.mj_forward(self.model, self.data)
+                self.elbow_tasks[side].set_target(
+                    mink.SE3.from_translation(elbow_target)
+                )
+                tasks.append(self.elbow_tasks[side])
+            if target.mode in {"end_effector", "both"}:
+                if arm_target.wrist_position_m is None:
+                    raise ValueError(
+                        f"{target.mode} target is missing wrist_position_m"
+                    )
+                wrist_target, _ = self._base_to_world(
+                    np.asarray(arm_target.wrist_position_m), np.eye(3)
+                )
+                self.wrist_tasks[side].set_target(
+                    mink.SE3.from_translation(wrist_target)
+                )
+                tasks.append(self.wrist_tasks[side])
+
+        solver_error: str | None = None
+        completed_iterations = 0
+        for _ in range(iterations):
+            try:
+                velocity = mink.solve_ik(
+                    self.configuration,
+                    tasks,
+                    dt=integration_dt,
+                    solver=self.solver,
+                    damping=damping,
+                    safety_break=False,
+                    limits=self.limits,
+                )
+            except Exception as exc:  # noqa: BLE001
+                solver_error = str(exc)
+                break
+            self.configuration.integrate_inplace(velocity, integration_dt)
+            completed_iterations += 1
 
         solution = self.data.qpos[self.all_qpos_addresses].copy()
         residuals: dict[str, dict[str, float]] = {}
@@ -197,13 +236,23 @@ class BimanualIk:
         self.last_diagnostics = {
             "target_sequence": target.sequence,
             "status": (
-                "converged" if maximum_residual <= tolerance else "residual_high"
+                "solver_error"
+                if solver_error is not None
+                else (
+                    "converged"
+                    if maximum_residual <= tolerance
+                    else "residual_high"
+                )
             ),
-            "iterations": iterations,
+            "solver": f"mink:{self.solver}",
+            "iterations": completed_iterations,
+            "requested_iterations": iterations,
+            "integration_dt_s": integration_dt,
             "damping": damping,
             "position_tolerance_m": tolerance,
             "maximum_residual_m": maximum_residual,
             "residuals": residuals,
+            "solver_error": solver_error,
             "solution_delta_from_previous_rad": (
                 solution - previous_solution
             ).tolist(),

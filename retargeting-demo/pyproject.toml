@@ -5,6 +5,7 @@ description = "Browser-webcam to bimanual OpenArm retargeting demo"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi>=0.115,<1",
+    "mink>=0.0.13,<0.1",
     "mujoco==3.6.0",
     "pillow==11.3.0",
     "rtmlib==0.0.15",
