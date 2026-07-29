@@ -194,6 +194,15 @@ def _initialize_model(model: mujoco.MjModel, data: mujoco.MjData) -> None:
     mujoco.mj_forward(model, data)
 
 
+def _lifter_top_command(model: mujoco.MjModel) -> tuple[int, float]:
+    actuator_id = _object_id(
+        model, mujoco.mjtObj.mjOBJ_ACTUATOR, "lifter_ctrl"
+    )
+    if not model.actuator_ctrllimited[actuator_id]:
+        raise RuntimeError("OpenArm lifter_ctrl must have a bounded control range")
+    return actuator_id, float(model.actuator_ctrlrange[actuator_id, 1])
+
+
 def simulation_worker(
     target_queue,
     sim_frame_queue,
@@ -219,6 +228,10 @@ def simulation_worker(
     model.vis.global_.offheight = height
     data = mujoco.MjData(model)
     _initialize_model(model, data)
+    lifter_actuator, lifter_top = _lifter_top_command(model)
+    lifter_joint = model.actuator_trnid[lifter_actuator, 0]
+    lifter_qpos_address = model.jnt_qposadr[lifter_joint]
+    data.ctrl[lifter_actuator] = lifter_top
     ik = BimanualIk(model, data)
     arm_actuators = ik.all_actuator_ids
     desired = data.ctrl[arm_actuators].copy()
@@ -282,6 +295,7 @@ def simulation_worker(
                     # OpenArm v2 uses position servos. This is the only command
                     # path: desired joints -> data.ctrl -> physics step.
                     data.ctrl[arm_actuators] = desired
+                    data.ctrl[lifter_actuator] = lifter_top
                     mujoco.mj_step(model, data)
 
                 commands = drain_latest(camera_queue)
@@ -326,6 +340,10 @@ def simulation_worker(
                         "simulation_time_s": round(float(data.time), 3),
                         "control_hz": round(1.0 / control_period, 1),
                         "render_fps": render_fps,
+                        "lifter_target_m": lifter_top,
+                        "lifter_position_m": round(
+                            float(data.qpos[lifter_qpos_address]), 4
+                        ),
                         "target_sequence": latest_sequence,
                         "target_age_ms": (
                             round(target_age_ms, 1)

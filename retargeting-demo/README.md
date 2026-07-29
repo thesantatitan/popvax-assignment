@@ -11,7 +11,8 @@ The runtime uses three independent OS processes:
    targets, renders both 2D and inset 3D pose views, and logs `RobotTarget` records.
 3. MuJoCo runs damped-least-squares IK, writes joint targets to `data.ctrl`, steps
    physics at the model's 1 kHz timestep, and renders independently. Joint commands
-   are exponentially smoothed before they reach `data.ctrl`.
+   are exponentially smoothed before they reach `data.ctrl`. The model's actuated
+   vertical lifter is continuously commanded to the top of its range (`0.3 m`).
 
 Every cross-process queue has capacity one. Old camera frames, targets, and renders
 are dropped instead of adding latency.

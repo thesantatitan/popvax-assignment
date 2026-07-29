@@ -39,6 +39,16 @@ def main() -> int:
         model = mujoco.MjModel.from_xml_path(str(MODEL))
         if model.nu < 14:
             problems.append(f"Expected at least 14 actuators, found {model.nu}")
+        lifter_id = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_ACTUATOR, "lifter_ctrl"
+        )
+        if lifter_id < 0:
+            problems.append("OpenArm lifter_ctrl actuator is missing")
+        elif model.actuator_ctrlrange[lifter_id, 1] != 0.3:
+            problems.append(
+                "Expected lifter upper control limit 0.3 m, found "
+                f"{model.actuator_ctrlrange[lifter_id, 1]}"
+            )
     if sys.platform.startswith("linux"):
         providers = ort.get_available_providers()
         if "CUDAExecutionProvider" not in providers:
