@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,14 +31,82 @@ class Runtime:
     engaged_event: object
 
 
+class BroadcastHub:
+    """Drain worker outputs once and fan them out to every connected page."""
+
+    def __init__(self, runtime: Runtime) -> None:
+        self.runtime = runtime
+        self.clients: set[asyncio.Queue] = set()
+        self.latest: dict[str, object] = {}
+
+    def register(self) -> asyncio.Queue:
+        channel: asyncio.Queue = asyncio.Queue(maxsize=8)
+        self.clients.add(channel)
+        for item in self.latest.values():
+            channel.put_nowait(item)
+        return channel
+
+    def unregister(self, channel: asyncio.Queue) -> None:
+        self.clients.discard(channel)
+
+    def publish(self, key: str, payload: object) -> None:
+        item = (key, payload)
+        self.latest[key] = item
+        for channel in tuple(self.clients):
+            if channel.full():
+                try:
+                    channel.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            channel.put_nowait(item)
+
+    async def run(self) -> None:
+        while True:
+            sent = False
+            pose_frame = drain_latest(self.runtime.pose_frame_queue)
+            if isinstance(pose_frame, RenderedFrame):
+                self.publish("pose", pose_frame)
+                sent = True
+            sim_frame = drain_latest(self.runtime.sim_frame_queue)
+            if isinstance(sim_frame, RenderedFrame):
+                self.publish("simulation-frame", sim_frame)
+                sent = True
+            perception = drain_latest(self.runtime.perception_telemetry_queue)
+            if perception is not None:
+                self.publish("perception", perception)
+                sent = True
+            simulation = drain_latest(self.runtime.simulation_telemetry_queue)
+            if simulation is not None:
+                self.publish("simulation", simulation)
+                sent = True
+            await asyncio.sleep(0.001 if sent else 0.005)
+
+
 def create_app(runtime: Runtime) -> FastAPI:
-    app = FastAPI(title="PopVax bimanual retargeting demo")
+    hub = BroadcastHub(runtime)
+    controller: WebSocket | None = None
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        broadcaster = asyncio.create_task(hub.run())
+        try:
+            yield
+        finally:
+            broadcaster.cancel()
+            with suppress(asyncio.CancelledError):
+                await broadcaster
+
+    app = FastAPI(
+        title="PopVax bimanual retargeting demo",
+        lifespan=lifespan,
+    )
 
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(INDEX)
 
     async def receive_browser(websocket: WebSocket) -> None:
+        nonlocal controller
         sequence = 0
         while True:
             message = await websocket.receive()
@@ -45,6 +114,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                 raise WebSocketDisconnect
             payload = message.get("bytes")
             if payload is not None:
+                controller = websocket
                 sequence += 1
                 put_latest(
                     runtime.frame_queue,
@@ -61,9 +131,10 @@ def create_app(runtime: Runtime) -> FastAPI:
             command = json.loads(text)
             action = command.get("action")
             if action == "calibrate":
+                controller = websocket
                 runtime.engaged_event.set()
                 runtime.calibrate_event.set()
-            elif action == "disengage":
+            elif action == "disengage" and controller is websocket:
                 runtime.engaged_event.clear()
             elif action in {"rotate", "pan", "zoom", "reset"}:
                 put_latest(
@@ -75,33 +146,25 @@ def create_app(runtime: Runtime) -> FastAPI:
                     ),
                 )
 
-    async def send_workers(websocket: WebSocket) -> None:
+    async def send_workers(
+        websocket: WebSocket, client_channel: asyncio.Queue
+    ) -> None:
         while True:
-            sent = False
-            pose_frame = drain_latest(runtime.pose_frame_queue)
-            if isinstance(pose_frame, RenderedFrame):
-                await websocket.send_bytes(b"P" + pose_frame.jpeg)
-                sent = True
-            sim_frame = drain_latest(runtime.sim_frame_queue)
-            if isinstance(sim_frame, RenderedFrame):
-                await websocket.send_bytes(b"S" + sim_frame.jpeg)
-                sent = True
-            for telemetry_queue in (
-                runtime.perception_telemetry_queue,
-                runtime.simulation_telemetry_queue,
-            ):
-                telemetry = drain_latest(telemetry_queue)
-                if telemetry is not None:
-                    await websocket.send_text(json.dumps(telemetry))
-                    sent = True
-            await asyncio.sleep(0.001 if sent else 0.005)
+            kind, payload = await client_channel.get()
+            if kind == "pose" and isinstance(payload, RenderedFrame):
+                await websocket.send_bytes(b"P" + payload.jpeg)
+            elif kind == "simulation-frame" and isinstance(payload, RenderedFrame):
+                await websocket.send_bytes(b"S" + payload.jpeg)
+            else:
+                await websocket.send_text(json.dumps(payload))
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
+        nonlocal controller
         await websocket.accept()
-        runtime.engaged_event.clear()
+        client_channel = hub.register()
         receiver = asyncio.create_task(receive_browser(websocket))
-        sender = asyncio.create_task(send_workers(websocket))
+        sender = asyncio.create_task(send_workers(websocket, client_channel))
         try:
             done, pending = await asyncio.wait(
                 {receiver, sender}, return_when=asyncio.FIRST_EXCEPTION
@@ -113,7 +176,10 @@ def create_app(runtime: Runtime) -> FastAPI:
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
-            runtime.engaged_event.clear()
+            if controller is websocket:
+                runtime.engaged_event.clear()
+                controller = None
+            hub.unregister(client_channel)
             receiver.cancel()
             sender.cancel()
 
