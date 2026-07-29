@@ -83,7 +83,74 @@ example `ssh -N -L 8010:127.0.0.1:8010 windows-cuda-wsl`.
 Use **Stop** to disengage new target application. The simulation continues to
 hold the last safe actuator command when targets are stale.
 
-## Validation and logs
+## Camera calibration
+
+Calibration is optional, but recommended when using **Use camera intrinsics**.
+It lets the retargeter undistort webcam landmarks and reconstruct them with the
+selected camera's measured focal length and principal point instead of the
+60-degree-field-of-view fallback.
+
+1. Start the server and open the web UI from the browser that owns the webcam.
+2. Open
+   [`retargeting-demo/calibration-board-a4.pdf`](retargeting-demo/calibration-board-a4.pdf)
+   and print it on A4 paper at **100% / Actual size**. Do not use Fit or Scale
+   to page.
+3. Verify that each chessboard square measures exactly `24 mm` and mount the
+   sheet flat.
+4. Start the camera in the web UI and expand **Camera calibration tool**.
+5. Click **Begin automatic calibration**.
+6. Move and tilt the board so it appears at different distances and in
+   different parts of the image. Keep the entire board sharp and visible.
+   Capture is automatic; near-duplicate views are rejected.
+7. Continue until the UI reports `12/12` accepted views and confirms that
+   calibration is complete.
+8. Enable **Use camera intrinsics**. The status should report `calibrated`
+   rather than `reasonable_default_60deg_hfov`.
+
+The generated profile is saved under a non-identifying hash of the browser
+camera device ID in
+[`retargeting-demo/calibrations/cameras.json`](retargeting-demo/calibrations/cameras.json).
+That file is tracked by Git, so review and commit a useful camera profile if it
+should be available to other checkouts. Changing cameras or browser device IDs
+may require another calibration.
+
+## Assignment target log
+
+The assignment-facing output is:
+
+```text
+retargeting-demo/assignment_logs/retargeting_target.jsonl
+```
+
+It contains one JSON object per control timestep. Each record is the explicit
+intermediate robot target produced by Mink IK: seven desired joint positions
+for the left arm and seven for the right arm, in radians, before robot-command
+smoothing and before assignment to `data.ctrl`. Records include:
+
+- `control_timestep`, `simulation_time_s`, and `time_ns`
+- `source_target_sequence` and the selected tracking `mode`
+- `tracking_active`
+- the exact joint order for both arms
+- `desired_joint_positions_rad.left` and
+  `desired_joint_positions_rad.right`
+
+The file has one stable name and is **truncated whenever the demo starts**.
+Copy or commit a run that must be retained before launching the demo again.
+When tracking confidence is unavailable, repeated records intentionally show
+the held desired pose.
+
+To inspect the latest targets while the demo is running:
+
+```bash
+tail -n 3 assignment_logs/retargeting_target.jsonl
+```
+
+This file is different from the ignored diagnostic files under `logs/`.
+`logs/targets-*.jsonl` contains perception targets and selected-person
+keypoints, while `logs/achieved-*.jsonl` contains achieved robot poses and
+Cartesian errors.
+
+## Validation
 
 Run the checks from `retargeting-demo/`:
 
@@ -92,15 +159,8 @@ uv run python verify_runtime.py
 uv run pytest
 ```
 
-The assignment-facing desired joint targets are written to
-`retargeting-demo/assignment_logs/retargeting_target.jsonl`; each demo start
-overwrites that file. Additional per-run perception and achieved-pose logs are
-written under `retargeting-demo/logs/`.
-
-For camera calibration, use the **Camera intrinsics** controls in the web UI.
-Print [`retargeting-demo/calibration-board-a4.pdf`](retargeting-demo/calibration-board-a4.pdf)
-at 100% / Actual size on A4 paper. Detailed calibration, coordinate-frame, IK,
-and environment-variable documentation is in
+Detailed coordinate-frame, IK, calibration-math, and environment-variable
+documentation is in
 [`retargeting-demo/README.md`](retargeting-demo/README.md).
 
 ## Troubleshooting
