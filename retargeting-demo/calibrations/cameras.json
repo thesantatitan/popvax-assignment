@@ -1,4 +1,42 @@
 {
-  "profiles": {},
+  "profiles": {
+    "6d453ac2b1d18f3f": {
+      "board": {
+        "columns": 7,
+        "dictionary": "DICT_5X5_100",
+        "marker_length_m": 0.018,
+        "rows": 10,
+        "square_length_m": 0.024
+      },
+      "camera_matrix": [
+        [
+          530.2261405021729,
+          0.0,
+          335.5285554561565
+        ],
+        [
+          0.0,
+          559.1831288543266,
+          362.49336750414824
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "distortion_coefficients": [
+        -0.011287660374798274,
+        -0.06372510515107584,
+        0.07903008058435343,
+        0.0039001590084749515,
+        0.29310184235036396
+      ],
+      "image_height": 480,
+      "image_width": 640,
+      "reprojection_error_px": 0.5040912398239688,
+      "source": "charuco"
+    }
+  },
   "version": 1
 }
