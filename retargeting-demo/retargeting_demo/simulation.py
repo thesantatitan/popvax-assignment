@@ -574,7 +574,7 @@ def simulation_worker(
     render_period = 1.0 / render_fps
     control_period = 1.0 / float(os.getenv("CONTROL_HZ", "60"))
     joint_smoothing_tau_s = float(
-        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0")
+        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0.1")
     )
     joint_smoothing_alpha = exponential_smoothing_alpha(
         control_period, joint_smoothing_tau_s

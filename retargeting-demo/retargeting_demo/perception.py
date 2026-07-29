@@ -171,7 +171,7 @@ def perception_worker(
     retargeter = SimccRetargeter(
         confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35")),
         smoothing_time_constant_s=float(
-            os.getenv("RETARGET_SMOOTHING_TAU_S", "0.25")
+            os.getenv("RETARGET_SMOOTHING_TAU_S", "0.5")
         ),
     )
     gate = ContinuousConfidenceGate(

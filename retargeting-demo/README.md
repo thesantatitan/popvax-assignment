@@ -164,6 +164,6 @@ Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`
 `ROBOT_COMMAND_MAX_SPEED_RAD_S`, `RETARGET_CONFIDENCE`,
 `RETARGET_CONFIDENCE_SECONDS`, `RTMW3D_DET_FREQUENCY`, and
 `OPENARM_MODEL_PATH`. Cartesian position and orientation smoothing default to
-`0.25 s`; set `RETARGET_SMOOTHING_TAU_S=0` to disable it. Robot-joint
-exponential smoothing defaults to `0`, while the separate joint-speed limit
-remains active unless `ROBOT_COMMAND_MAX_SPEED_RAD_S` is increased.
+`0.5 s`; set `RETARGET_SMOOTHING_TAU_S=0` to disable it. Robot-joint
+exponential smoothing defaults to `0.1 s`, while the separate joint-speed
+limit remains active unless `ROBOT_COMMAND_MAX_SPEED_RAD_S` is increased.
