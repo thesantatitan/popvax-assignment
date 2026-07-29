@@ -29,6 +29,10 @@ dev = [
 [tool.uv]
 package = false
 
+[tool.uv.extra-build-dependencies]
+# chumpy 0.70 imports pip from setup.py but does not declare it.
+chumpy = ["pip"]
+
 [[tool.uv.index]]
 name = "nvidia"
 url = "https://pypi.nvidia.com"
