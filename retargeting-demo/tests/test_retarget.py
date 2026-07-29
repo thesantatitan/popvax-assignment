@@ -9,6 +9,7 @@ from retargeting_demo.retarget import (
     SimccRetargeter,
     hand_frame,
     simcc_to_camera_points,
+    target_record,
 )
 
 
@@ -107,3 +108,23 @@ def test_low_hand_confidence_rejects_target() -> None:
         assert "confidence" in str(error)
     else:
         raise AssertionError("low-confidence hand should not produce a target")
+
+
+def test_target_record_includes_selected_simcc_keypoints() -> None:
+    simcc, scores = synthetic_pose()
+    target = SimccRetargeter().make_target(
+        sequence=7,
+        capture_time_ns=100,
+        inference_time_ns=200,
+        simcc=simcc,
+        scores=scores,
+    )
+
+    record = target_record(
+        target,
+        keypoints_simcc=simcc[0],
+        person_index=0,
+    )
+
+    assert record["keypoints_simcc_person_index"] == 0
+    np.testing.assert_allclose(record["keypoints_simcc"], simcc[0])

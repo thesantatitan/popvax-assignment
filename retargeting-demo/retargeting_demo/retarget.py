@@ -218,7 +218,22 @@ class SimccRetargeter:
         )
 
 
-def target_record(target: RobotTarget) -> dict[str, object]:
+def target_record(
+    target: RobotTarget,
+    *,
+    keypoints_simcc: np.ndarray | None = None,
+    person_index: int | None = None,
+) -> dict[str, object]:
     """JSON-compatible target record used by the assessment logger."""
 
-    return asdict(target)
+    record = asdict(target)
+    if keypoints_simcc is not None:
+        points = np.asarray(keypoints_simcc)
+        if points.ndim != 2 or points.shape[-1] != 3:
+            raise ValueError(
+                "keypoints_simcc must have shape (keypoints, 3), "
+                f"got {points.shape}"
+            )
+        record["keypoints_simcc"] = points.tolist()
+        record["keypoints_simcc_person_index"] = person_index
+    return record

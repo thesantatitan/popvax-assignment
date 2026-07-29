@@ -87,9 +87,10 @@ browser or selecting **Stop** disengages new target application.
 - IK uses the analytic MuJoCo end-effector position Jacobian and joint-limit
   clipping. Its joint solution is exponentially smoothed at the control rate.
 
-Intermediate targets are logged to `logs/targets-*.jsonl`; achieved elbow/wrist
-poses and Cartesian errors are logged to `logs/achieved-*.jsonl`. `logs/` is ignored
-by Git.
+Intermediate targets, the selected person's decoded `keypoints_simcc`, and that
+person's detection index are logged to `logs/targets-*.jsonl`; achieved elbow/wrist
+poses and Cartesian errors are logged to `logs/achieved-*.jsonl`. `logs/` is
+ignored by Git.
 
 ## Validation
 

@@ -260,9 +260,15 @@ def perception_worker(
                 if gate_state.ready:
                     engaged_event.set()
                     put_latest(target_queue, target)
+                    person_index = retargeter.select_person(scores)
                     output.write(
                         json.dumps(
-                            target_record(target), separators=(",", ":")
+                            target_record(
+                                target,
+                                keypoints_simcc=simcc[person_index],
+                                person_index=person_index,
+                            ),
+                            separators=(",", ":"),
                         )
                         + "\n"
                     )
