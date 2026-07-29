@@ -59,17 +59,6 @@ cd retargeting-demo
 Open [http://localhost:8000](http://localhost:8000) in a browser on that
 machine and allow camera access.
 
-To use a Mac's webcam while the server runs in WSL, create the tunnel from the
-Mac in a second terminal:
-
-```bash
-ssh -N -L 8000:127.0.0.1:8000 windows-cuda-wsl
-```
-
-Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) on the Mac. Camera
-permission belongs to the browser that opens this page, so the Mac camera is
-sent to the WSL server through the tunnel.
-
 The server listens on `0.0.0.0:8000` by default. Change it with
 `RETARGETING_HOST` and `RETARGETING_PORT`, or pass simulation arguments through
 the launcher, for example:
