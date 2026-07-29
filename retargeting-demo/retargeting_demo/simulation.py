@@ -93,6 +93,7 @@ class BimanualIk:
             [self.qpos_addresses[side] for side in SIDES]
         )
         self.previous_solution = initial_data.qpos[self.all_qpos_addresses].copy()
+        self.last_diagnostics: dict[str, object] | None = None
 
     def _base_to_world(
         self, position: np.ndarray, rotation: np.ndarray
@@ -105,6 +106,7 @@ class BimanualIk:
         )
 
     def solve(self, target: RobotTarget, seed_qpos: np.ndarray) -> np.ndarray:
+        previous_solution = self.previous_solution.copy()
         self.data.qpos[:] = seed_qpos
         # Warm-start from the previous kinematic solution rather than the
         # lagging, contact-affected physical state. Consecutive camera targets
@@ -173,6 +175,53 @@ class BimanualIk:
                 mujoco.mj_forward(self.model, self.data)
 
         solution = self.data.qpos[self.all_qpos_addresses].copy()
+        residuals: dict[str, dict[str, float]] = {}
+        maximum_residual = 0.0
+        for side in SIDES:
+            arm_target = getattr(target, side)
+            side_residuals: dict[str, float] = {}
+            if target.mode in {"elbow", "both"}:
+                elbow_target, _ = self._base_to_world(
+                    np.asarray(arm_target.elbow_position_m), np.eye(3)
+                )
+                side_residuals["elbow_position_m"] = float(
+                    np.linalg.norm(
+                        elbow_target - self.data.xpos[self.elbow_bodies[side]]
+                    )
+                )
+            if target.mode in {"end_effector", "both"}:
+                if arm_target.wrist_position_m is None:
+                    raise ValueError(
+                        f"{target.mode} target is missing wrist_position_m"
+                    )
+                wrist_target, _ = self._base_to_world(
+                    np.asarray(arm_target.wrist_position_m), np.eye(3)
+                )
+                side_residuals["wrist_position_m"] = float(
+                    np.linalg.norm(
+                        wrist_target - self.data.site_xpos[self.wrist_sites[side]]
+                    )
+                )
+            residuals[side] = side_residuals
+            maximum_residual = max(maximum_residual, *side_residuals.values())
+        tolerance = float(os.getenv("IK_POSITION_TOLERANCE_M", "0.01"))
+        self.last_diagnostics = {
+            "target_sequence": target.sequence,
+            "status": (
+                "converged" if maximum_residual <= tolerance else "residual_high"
+            ),
+            "iterations": iterations,
+            "damping": damping,
+            "position_tolerance_m": tolerance,
+            "maximum_residual_m": maximum_residual,
+            "residuals": residuals,
+            "solution_delta_from_previous_rad": (
+                solution - previous_solution
+            ).tolist(),
+            "solution_delta_norm_rad": float(
+                np.linalg.norm(solution - previous_solution)
+            ),
+        }
         self.previous_solution = solution
         return solution
 
@@ -382,6 +431,43 @@ def simulation_worker(
                     }
                     put_latest(telemetry_queue, state)
                     if active_target is not None:
+                        joint_state = {
+                            "order": {
+                                side: [
+                                    f"{side}_joint{index}"
+                                    for index in range(1, 8)
+                                ]
+                                for side in SIDES
+                            },
+                            "ik_solution_rad": {
+                                side: ik_solution[
+                                    index * 7 : (index + 1) * 7
+                                ].tolist()
+                                for index, side in enumerate(SIDES)
+                            },
+                            "smoothed_command_rad": {
+                                side: desired[
+                                    index * 7 : (index + 1) * 7
+                                ].tolist()
+                                for index, side in enumerate(SIDES)
+                            },
+                            "data_ctrl_rad": {
+                                side: data.ctrl[ik.actuator_ids[side]].tolist()
+                                for side in SIDES
+                            },
+                            "qpos_rad": {
+                                side: data.qpos[
+                                    ik.qpos_addresses[side]
+                                ].tolist()
+                                for side in SIDES
+                            },
+                            "qvel_rad_s": {
+                                side: data.qvel[
+                                    ik.dof_addresses[side]
+                                ].tolist()
+                                for side in SIDES
+                            },
+                        }
                         output.write(
                             json.dumps(
                                 {
@@ -389,6 +475,8 @@ def simulation_worker(
                                     "simulation_time_s": float(data.time),
                                     "target_sequence": latest_sequence,
                                     "achieved": achieved,
+                                    "joints": joint_state,
+                                    "ik": ik.last_diagnostics,
                                 },
                                 separators=(",", ":"),
                             )
