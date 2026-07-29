@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+import ctypes
+import os
 import queue
+import signal
+import sys
 from multiprocessing.queues import Queue
 from typing import TypeVar
 
 T = TypeVar("T")
+
+
+def configure_parent_death_signal() -> int:
+    """Ask Linux to terminate this worker if its parent process disappears."""
+
+    parent_pid = os.getppid()
+    if sys.platform.startswith("linux"):
+        libc = ctypes.CDLL(None)
+        if libc.prctl(1, signal.SIGTERM) != 0:  # PR_SET_PDEATHSIG
+            raise OSError("Could not configure the worker parent-death signal")
+        if os.getppid() != parent_pid:
+            raise SystemExit("Worker parent exited during startup")
+    return parent_pid
 
 
 def put_latest(channel: Queue, item: T) -> None:

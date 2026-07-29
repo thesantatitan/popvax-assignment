@@ -15,7 +15,7 @@ import onnxruntime as ort
 from rtmlib import YOLOX, Custom, Wholebody3d, draw_skeleton
 
 from .contracts import BrowserFrame, RenderedFrame
-from .ipc import drain_latest, put_latest
+from .ipc import configure_parent_death_signal, drain_latest, put_latest
 from .retarget import SimccRetargeter, target_record
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,7 +164,7 @@ def perception_worker(
 ) -> None:
     """Process entrypoint. CUDA and TensorRT are initialized only in this process."""
 
-    parent_pid = os.getppid()
+    parent_pid = configure_parent_death_signal()
     tracker, device, backend = _make_tracker()
     retargeter = SimccRetargeter(
         confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35")),

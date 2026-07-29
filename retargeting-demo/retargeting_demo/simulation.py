@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image
 
 from .contracts import RenderedFrame, RobotTarget
-from .ipc import drain_latest, put_latest
+from .ipc import configure_parent_death_signal, drain_latest, put_latest
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
@@ -236,7 +236,7 @@ def simulation_worker(
 ) -> None:
     """Process entrypoint. MuJoCo steps independently from web and inference."""
 
-    parent_pid = os.getppid()
+    parent_pid = configure_parent_death_signal()
     model_path = Path(os.getenv("OPENARM_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
     if not model_path.is_file():
         raise FileNotFoundError(
