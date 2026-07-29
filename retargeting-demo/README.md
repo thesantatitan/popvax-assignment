@@ -37,8 +37,10 @@ Override it with `RTMW3D_TRT_ENGINE` if needed.
 
 The original OpenArm v2 model and all required meshes are tracked under
 `vendor/openarm-v2`. Setup does not clone or download OpenArm. The vendored source
-is pinned to upstream commit `8955afb54e4adfb59a236e2b4d15192b7a02865c` and
-retains its Apache-2.0 license. Its actuated vertical lifter is unchanged.
+is based on upstream commit `8955afb54e4adfb59a236e2b4d15192b7a02865c` and
+retains its Apache-2.0 license. The monolithic enclosure visual and its roof,
+side-wall, and front-wall collision boxes are removed; the table, rails, and
+actuated vertical lifter are unchanged.
 
 ## Launch
 
