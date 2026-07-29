@@ -24,11 +24,12 @@ cd /home/dev/popvax-assignment/openarm-mujoco
 ./setup.sh
 ```
 
-Then install the combined Python 3.11 environment with `uv`:
+Then install and verify the combined Python 3.11 environment with `uv`:
 
 ```bash
 cd /home/dev/popvax-assignment/retargeting-demo
-uv sync --extra gpu --extra tensorrt --extra dev
+chmod +x setup.sh
+./setup.sh
 ```
 
 The default TensorRT engine is:
@@ -89,6 +90,7 @@ by Git.
 
 ```bash
 uv run pytest
+uv run python verify_runtime.py
 ```
 
 Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`,

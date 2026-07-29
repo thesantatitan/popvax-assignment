@@ -14,7 +14,6 @@ from fastapi.responses import FileResponse
 from .contracts import BrowserFrame, RenderedFrame
 from .ipc import drain_latest, put_latest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "web" / "index.html"
 

@@ -8,7 +8,6 @@ import numpy as np
 
 from .contracts import ArmTarget, RobotTarget
 
-
 BODY = {
     "left": {"shoulder": 5, "elbow": 7, "wrist": 9, "hand_start": 91},
     "right": {"shoulder": 6, "elbow": 8, "wrist": 10, "hand_start": 112},

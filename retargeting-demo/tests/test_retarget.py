@@ -4,8 +4,8 @@ from retargeting_demo.retarget import (
     BODY,
     CAMERA_TO_ROBOT,
     FOREARM_LENGTH_M,
-    SimccRetargeter,
     UPPER_ARM_LENGTH_M,
+    SimccRetargeter,
     hand_frame,
     simcc_to_camera_points,
 )

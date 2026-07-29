@@ -20,7 +20,6 @@ from PIL import Image
 from .contracts import RenderedFrame, RobotTarget
 from .ipc import drain_latest, put_latest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
     ROOT.parent
@@ -261,7 +260,9 @@ def simulation_worker(
     mujoco.mjv_defaultFreeCamera(model, camera)
     frame_number = 0
 
-    with achieved_log.open("a", encoding="utf-8", buffering=1) as output:
+    with achieved_log.open(  # noqa: SIM117
+        "a", encoding="utf-8", buffering=1
+    ) as output:
         with mujoco.Renderer(model, height=height, width=width) as renderer:
             while not stop_event.is_set():
                 now = time.monotonic()

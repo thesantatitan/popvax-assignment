@@ -13,7 +13,6 @@ from .perception import perception_worker
 from .server import Runtime, create_app
 from .simulation import simulation_worker
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

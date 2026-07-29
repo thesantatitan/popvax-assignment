@@ -6,7 +6,6 @@ import queue
 from multiprocessing.queues import Queue
 from typing import TypeVar
 
-
 T = TypeVar("T")
 
 
