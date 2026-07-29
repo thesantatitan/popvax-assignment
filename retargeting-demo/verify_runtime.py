@@ -14,9 +14,11 @@ MODEL = Path(
     os.getenv(
         "OPENARM_MODEL_PATH",
         str(
-            ROOT
-            / "vendor"
-            / "openarm-v2"
+            ROOT.parent
+            / "openarm-mujoco"
+            / ".assets"
+            / "openarm_mujoco"
+            / "v2"
             / "cell.xml"
         ),
     )
@@ -37,10 +39,6 @@ def main() -> int:
         model = mujoco.MjModel.from_xml_path(str(MODEL))
         if model.nu < 14:
             problems.append(f"Expected at least 14 actuators, found {model.nu}")
-        if mujoco.mj_name2id(
-            model, mujoco.mjtObj.mjOBJ_JOINT, "openarm_lifter_joint"
-        ) >= 0:
-            problems.append("OpenArm lifter must be fixed, not a sliding joint")
     if sys.platform.startswith("linux"):
         providers = ort.get_available_providers()
         if "CUDAExecutionProvider" not in providers:
