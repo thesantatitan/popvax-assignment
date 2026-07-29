@@ -19,6 +19,7 @@ from PIL import Image
 
 from .contracts import RenderedFrame, RobotTarget
 from .ipc import configure_parent_death_signal, drain_latest, put_latest
+from .retarget import exponential_smoothing_alpha
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
@@ -293,7 +294,8 @@ def simulation_worker(
     data.ctrl[lifter_actuator] = lifter_top
     ik = BimanualIk(model, data)
     arm_actuators = ik.all_actuator_ids
-    ik_solution = data.ctrl[arm_actuators].copy()
+    joint_command = data.ctrl[arm_actuators].copy()
+    ik_solution = joint_command.copy()
     active_target: RobotTarget | None = None
     target_dirty = False
     last_target_wall = 0.0
@@ -304,6 +306,15 @@ def simulation_worker(
     achieved_log = log_path / f"achieved-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     render_period = 1.0 / render_fps
     control_period = 1.0 / float(os.getenv("CONTROL_HZ", "60"))
+    joint_smoothing_tau_s = float(
+        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0.12")
+    )
+    joint_smoothing_alpha = exponential_smoothing_alpha(
+        control_period, joint_smoothing_tau_s
+    )
+    joint_max_speed_rad_s = float(
+        os.getenv("ROBOT_COMMAND_MAX_SPEED_RAD_S", "3.0")
+    )
     next_render = time.monotonic()
     next_control = next_render
     wall_start = next_render
@@ -327,20 +338,26 @@ def simulation_worker(
                     active_target = None
                     target_dirty = False
 
-                if now >= next_control:
-                    next_control += control_period
-                    if next_control <= now:
-                        next_control = now + control_period
-
                 if target_dirty and active_target is not None:
                     ik_solution = ik.solve(active_target, data.qpos)
                     target_dirty = False
 
+                if now >= next_control:
+                    joint_command += np.clip(
+                        joint_smoothing_alpha * (ik_solution - joint_command),
+                        -joint_max_speed_rad_s * control_period,
+                        joint_max_speed_rad_s * control_period,
+                    )
+                    next_control += control_period
+                    if next_control <= now:
+                        next_control = now + control_period
+
                 target_simulation_time = now - wall_start
                 while data.time < target_simulation_time:
                     # OpenArm v2 uses position servos. This is the only command
-                    # path: filtered Cartesian target -> IK -> data.ctrl.
-                    data.ctrl[arm_actuators] = ik_solution
+                    # path: filtered Cartesian target -> IK -> filtered joints
+                    # -> data.ctrl.
+                    data.ctrl[arm_actuators] = joint_command
                     data.ctrl[lifter_actuator] = lifter_top
                     mujoco.mj_step(model, data)
 
@@ -385,6 +402,8 @@ def simulation_worker(
                         "type": "simulation",
                         "simulation_time_s": round(float(data.time), 3),
                         "control_hz": round(1.0 / control_period, 1),
+                        "joint_smoothing_tau_s": joint_smoothing_tau_s,
+                        "joint_smoothing_alpha": joint_smoothing_alpha,
                         "render_fps": render_fps,
                         "mode": (
                             active_target.mode
@@ -421,7 +440,7 @@ def simulation_worker(
                                 for index, side in enumerate(SIDES)
                             },
                             "command_rad": {
-                                side: ik_solution[
+                                side: joint_command[
                                     index * 7 : (index + 1) * 7
                                 ].tolist()
                                 for index, side in enumerate(SIDES)
@@ -452,6 +471,13 @@ def simulation_worker(
                                     "achieved": achieved,
                                     "joints": joint_state,
                                     "ik": ik.last_diagnostics,
+                                    "joint_filter": {
+                                        "time_constant_s": joint_smoothing_tau_s,
+                                        "alpha": joint_smoothing_alpha,
+                                        "maximum_speed_rad_s": (
+                                            joint_max_speed_rad_s
+                                        ),
+                                    },
                                 },
                                 separators=(",", ":"),
                             )
