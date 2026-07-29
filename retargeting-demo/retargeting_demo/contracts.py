@@ -31,6 +31,9 @@ class RobotTarget:
     capture_time_ns: int
     inference_time_ns: int
     mode: RetargetMode
+    camera_intrinsics_enabled: bool
+    camera_intrinsics_source: str | None
+    estimated_root_depth_m: float | None
     left: ArmTarget
     right: ArmTarget
 

@@ -9,20 +9,28 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
+from .camera_calibration import (
+    CalibrationStore,
+    CharucoCalibrationSession,
+    camera_profile_id,
+)
 from .contracts import RETARGET_MODES, BrowserFrame, RenderedFrame
 from .ipc import drain_latest, put_latest
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "web" / "index.html"
+CALIBRATION_BOARD_PNG = ROOT / "calibration-board-a4-300dpi.png"
+CALIBRATION_BOARD_PDF = ROOT / "calibration-board-a4.pdf"
 
 
 @dataclass(slots=True)
 class Runtime:
     frame_queue: object
     mode_queue: object
+    camera_config_queue: object
     pose_frame_queue: object
     sim_frame_queue: object
     perception_telemetry_queue: object
@@ -86,6 +94,8 @@ class BroadcastHub:
 def create_app(runtime: Runtime) -> FastAPI:
     hub = BroadcastHub(runtime)
     controller: WebSocket | None = None
+    calibration_store = CalibrationStore()
+    calibration_sessions: dict[str, CharucoCalibrationSession] = {}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -105,6 +115,47 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(INDEX)
+
+    @app.get("/calibration-board-a4-300dpi.png")
+    async def calibration_board_png() -> FileResponse:
+        return FileResponse(CALIBRATION_BOARD_PNG)
+
+    @app.get("/calibration-board-a4.pdf")
+    async def calibration_board_pdf() -> FileResponse:
+        return FileResponse(CALIBRATION_BOARD_PDF)
+
+    @app.post("/api/calibration/reset")
+    async def reset_calibration(camera_id: str) -> dict[str, object]:
+        profile_id = camera_profile_id(camera_id)
+        calibration_sessions[profile_id] = CharucoCalibrationSession()
+        return {"profile_id": profile_id, "views": 0}
+
+    @app.post("/api/calibration/capture")
+    async def capture_calibration(
+        request: Request, camera_id: str
+    ) -> dict[str, object]:
+        profile_id = camera_profile_id(camera_id)
+        session = calibration_sessions.setdefault(
+            profile_id, CharucoCalibrationSession()
+        )
+        try:
+            result = session.capture(await request.body())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"profile_id": profile_id, **result}
+
+    @app.post("/api/calibration/finish")
+    async def finish_calibration(camera_id: str) -> dict[str, object]:
+        profile_id = camera_profile_id(camera_id)
+        session = calibration_sessions.get(profile_id)
+        if session is None:
+            raise HTTPException(status_code=400, detail="Start calibration first")
+        try:
+            profile = session.calibrate()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        calibration_store.save(profile_id, profile)
+        return {"profile_id": profile_id, **profile}
 
     async def receive_browser(websocket: WebSocket) -> None:
         nonlocal controller
@@ -140,6 +191,22 @@ def create_app(runtime: Runtime) -> FastAPI:
                     runtime.engaged_event.clear()
                     runtime.tracking_reset_event.set()
                     put_latest(runtime.mode_queue, mode)
+            elif action == "set_camera_intrinsics":
+                width = max(1, int(command.get("width", 640)))
+                height = max(1, int(command.get("height", 480)))
+                profile_id, intrinsics = calibration_store.resolve(
+                    str(command.get("camera_id", "")), width, height
+                )
+                put_latest(
+                    runtime.camera_config_queue,
+                    {
+                        "enabled": bool(command.get("enabled", False)),
+                        "profile_id": profile_id,
+                        **intrinsics,
+                    },
+                )
+                runtime.engaged_event.clear()
+                runtime.tracking_reset_event.set()
             elif action in {"rotate", "pan", "zoom", "reset"}:
                 put_latest(
                     runtime.camera_queue,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+import cv2
 import numpy as np
 
 from .contracts import RETARGET_MODES, ArmTarget, RetargetMode, RobotTarget
@@ -18,6 +19,8 @@ SHOULDER_POSITIONS = {
 }
 UPPER_ARM_LENGTH_M = 0.220
 FOREARM_LENGTH_M = 0.216
+ASSUMED_SHOULDER_WIDTH_M = 0.38
+FALLBACK_ROOT_DEPTH_M = 2.5
 # RTMW3D: +x image-right, +y image-down, +z depth. OpenArm arm_origin:
 # +x forward into the cell, +y robot-left, +z up.
 CAMERA_TO_ROBOT = np.array(
@@ -63,6 +66,85 @@ def simcc_to_camera_points(simcc: np.ndarray) -> np.ndarray:
     return points
 
 
+def _estimate_root_depth(
+    normalized_rays: np.ndarray,
+    relative_depth: np.ndarray,
+) -> float:
+    """Solve root depth from the two shoulder rays and assumed shoulder width."""
+
+    left = BODY["left"]["shoulder"]
+    right = BODY["right"]["shoulder"]
+    ray_left = np.array(
+        [normalized_rays[left, 0], normalized_rays[left, 1], 1.0]
+    )
+    ray_right = np.array(
+        [normalized_rays[right, 0], normalized_rays[right, 1], 1.0]
+    )
+    a = ray_left - ray_right
+    b = ray_left * relative_depth[left] - ray_right * relative_depth[right]
+    coefficients = (
+        float(a @ a),
+        float(2.0 * (a @ b)),
+        float(b @ b - ASSUMED_SHOULDER_WIDTH_M**2),
+    )
+    roots = np.roots(coefficients)
+    candidates = [
+        float(root.real)
+        for root in roots
+        if abs(float(root.imag)) < 1e-7
+        and 0.5 <= float(root.real) <= 6.0
+        and float(root.real)
+        + min(float(relative_depth[left]), float(relative_depth[right]))
+        > 0.1
+    ]
+    if not candidates:
+        return FALLBACK_ROOT_DEPTH_M
+    return min(candidates, key=lambda value: abs(value - FALLBACK_ROOT_DEPTH_M))
+
+
+def reconstruct_with_intrinsics(
+    simcc: np.ndarray,
+    keypoints_2d: np.ndarray,
+    intrinsics: dict[str, object],
+) -> tuple[np.ndarray, float]:
+    """Backproject original-image points using decoded root-relative depth."""
+
+    points_2d = np.asarray(keypoints_2d, dtype=np.float64)
+    if points_2d.ndim != 2 or points_2d.shape[-1] != 2:
+        raise ValueError(f"Expected (keypoints, 2), got {points_2d.shape}")
+    matrix = np.asarray(intrinsics["camera_matrix"], dtype=np.float64)
+    distortion = np.asarray(
+        intrinsics["distortion_coefficients"], dtype=np.float64
+    )
+    normalized = cv2.undistortPoints(
+        points_2d.reshape(-1, 1, 2), matrix, distortion
+    ).reshape(-1, 2)
+    relative_depth = (
+        np.asarray(simcc, dtype=np.float64)[:, 2] / (384.0 / 2.0) - 1.0
+    ) * 2.1744869
+    root_depth = _estimate_root_depth(normalized, relative_depth)
+    absolute_depth = root_depth + relative_depth
+    arm_indices = [
+        BODY[side][joint]
+        for side in ("left", "right")
+        for joint in ("shoulder", "elbow", "wrist")
+    ]
+    if np.min(absolute_depth[arm_indices]) <= 0.1:
+        root_depth = max(
+            FALLBACK_ROOT_DEPTH_M,
+            0.2 - float(np.min(relative_depth[arm_indices])),
+        )
+        absolute_depth = root_depth + relative_depth
+    points = np.column_stack(
+        (
+            normalized[:, 0] * absolute_depth,
+            normalized[:, 1] * absolute_depth,
+            absolute_depth,
+        )
+    )
+    return points, root_depth
+
+
 class SimccRetargeter:
     """Body-size-invariant absolute bimanual retargeting."""
 
@@ -103,12 +185,24 @@ class SimccRetargeter:
         simcc: np.ndarray,
         scores: np.ndarray,
         mode: RetargetMode,
+        keypoints_2d: np.ndarray | None = None,
+        camera_intrinsics: dict[str, object] | None = None,
     ) -> RobotTarget:
         if mode not in RETARGET_MODES:
             raise ValueError(f"Unsupported retargeting mode: {mode}")
         person = self.select_person(scores)
         person_scores = np.asarray(scores, dtype=np.float64)[person]
-        camera_points = simcc_to_camera_points(np.asarray(simcc)[person])
+        estimated_root_depth: float | None = None
+        if camera_intrinsics is not None:
+            if keypoints_2d is None:
+                raise ValueError("Camera intrinsics require original-image keypoints")
+            camera_points, estimated_root_depth = reconstruct_with_intrinsics(
+                np.asarray(simcc)[person],
+                np.asarray(keypoints_2d)[person],
+                camera_intrinsics,
+            )
+        else:
+            camera_points = simcc_to_camera_points(np.asarray(simcc)[person])
         robot_points = camera_points @ CAMERA_TO_ROBOT.T
 
         for side, indices in BODY.items():
@@ -167,6 +261,13 @@ class SimccRetargeter:
             capture_time_ns=capture_time_ns,
             inference_time_ns=inference_time_ns,
             mode=mode,
+            camera_intrinsics_enabled=camera_intrinsics is not None,
+            camera_intrinsics_source=(
+                str(camera_intrinsics["source"])
+                if camera_intrinsics is not None
+                else None
+            ),
+            estimated_root_depth_m=estimated_root_depth,
             left=arms["left"],
             right=arms["right"],
         )

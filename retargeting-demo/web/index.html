@@ -79,6 +79,13 @@
       .pill.warn { color: var(--amber); border-color: #69562e; }
       .pill.bad { color: var(--red); border-color: #6d3440; }
       .note { margin: 14px 2px 0; color: var(--muted); }
+      .calibration {
+        margin: 0 0 16px; padding: 11px 13px; background: #101722d9;
+        border: 1px solid var(--line); border-radius: 14px; color: var(--muted);
+      }
+      .calibration summary { color: var(--text); cursor: pointer; font-weight: 800; }
+      .calibration-tools { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 11px; }
+      .calibration a { color: var(--blue); }
       canvas { display: none; }
       @media (max-width: 940px) {
         .views { grid-template-columns: 1fr; }
@@ -114,8 +121,32 @@
             <option value="both" selected>Elbow + end effector</option>
           </select>
         </label>
+        <label class="control" for="useIntrinsics">
+          <input id="useIntrinsics" type="checkbox" />
+          Use camera intrinsics
+        </label>
         <span id="message">Start the camera on this device.</span>
       </section>
+
+      <details class="calibration">
+        <summary>Camera calibration tool</summary>
+        <p>
+          Print the <a href="/calibration-board-a4.pdf" target="_blank">exact A4 PDF</a>
+          at 100% / actual size, or use the
+          <a href="/calibration-board-a4-300dpi.png" download>300 DPI PNG</a>.
+          Each chessboard square must measure exactly 24 mm. Mount it flat.
+        </p>
+        <p>
+          Capture at least 12 sharply focused views while moving the board around the
+          frame and changing its tilt. Keep the full board visible where possible.
+        </p>
+        <div class="calibration-tools">
+          <button id="beginCalibration" class="secondary">Begin calibration</button>
+          <button id="captureCalibration" class="secondary" disabled>Capture view</button>
+          <button id="finishCalibration" class="secondary" disabled>Save calibration</button>
+          <span id="calibrationStatus">No calibration session active.</span>
+        </div>
+      </details>
 
       <section class="views">
         <article class="view">
@@ -154,6 +185,7 @@
 
       <section class="status-row">
         <span id="model" class="pill">Model loading</span>
+        <span id="intrinsicsStatus" class="pill">Camera intrinsics disabled</span>
         <span id="tracking" class="pill warn">Waiting for confident pose</span>
         <span id="physics" class="pill warn">Physics starting</span>
       </section>
@@ -176,6 +208,12 @@
       const startButton = document.getElementById("start");
       const stopButton = document.getElementById("stop");
       const retargetMode = document.getElementById("retargetMode");
+      const useIntrinsics = document.getElementById("useIntrinsics");
+      const beginCalibration = document.getElementById("beginCalibration");
+      const captureCalibration = document.getElementById("captureCalibration");
+      const finishCalibration = document.getElementById("finishCalibration");
+      const calibrationStatus = document.getElementById("calibrationStatus");
+      const intrinsicsStatus = document.getElementById("intrinsicsStatus");
       const connection = document.getElementById("connection");
       const message = document.getElementById("message");
       let stream = null;
@@ -187,11 +225,21 @@
       let drag = null;
       let cameraPending = null;
       let cameraScheduled = false;
+      let cameraId = "";
 
       function setMessage(text) { message.textContent = text; }
       function value(id, text) { document.getElementById(id).textContent = text; }
       function sendCommand(command) {
         if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(command));
+      }
+      function sendCameraIntrinsicsSetting() {
+        sendCommand({
+          action: "set_camera_intrinsics",
+          enabled: useIntrinsics.checked,
+          camera_id: cameraId,
+          width: canvas.width || 640,
+          height: canvas.height || 480,
+        });
       }
       function updateTelemetry(data) {
         if (data.type === "perception") {
@@ -199,6 +247,10 @@
           value("poseFps", data.fps == null ? "—" : `${data.fps} FPS`);
           value("inference", data.processing_ms == null ? "—" : `${data.processing_ms} ms`);
           value("model", `${data.backend} · ${data.device}`);
+          intrinsicsStatus.textContent = data.camera_intrinsics_enabled
+            ? `Camera intrinsics · ${data.camera_intrinsics_source}`
+            : "Camera intrinsics disabled";
+          intrinsicsStatus.className = `pill ${data.camera_intrinsics_enabled ? "good" : ""}`;
           const tracking = document.getElementById("tracking");
           const minimum = data.minimum_confidence == null ? "—" : data.minimum_confidence.toFixed(2);
           if (data.tracking_state === "tracking") {
@@ -295,6 +347,7 @@
           connection.textContent = "Pipeline connected";
           connection.className = "connection online";
           sendCommand({ action: "set_mode", mode: retargetMode.value });
+          sendCameraIntrinsicsSetting();
           setMessage(stream ? "Keep the required arm keypoints visible." : "Start the camera on this device.");
         };
         socket.onmessage = receiveMessage;
@@ -324,7 +377,9 @@
           canvas.width = Math.min(video.videoWidth || 640, 640);
           canvas.height = Math.round(canvas.width * (video.videoHeight || 480) / (video.videoWidth || 640));
           value("cameraState", `${canvas.width}×${canvas.height}`);
+          cameraId = stream.getVideoTracks()[0]?.getSettings().deviceId || "";
           connectSocket();
+          sendCameraIntrinsicsSetting();
           setMessage("Acquiring a high-confidence pose for two continuous seconds…");
           requestAnimationFrame(captureNext);
         } catch (error) {
@@ -338,6 +393,49 @@
       retargetMode.addEventListener("change", () => {
         sendCommand({ action: "set_mode", mode: retargetMode.value });
         setMessage("Mode changed. Acquiring a confident pose for two continuous seconds…");
+      });
+      useIntrinsics.addEventListener("change", () => {
+        sendCameraIntrinsicsSetting();
+        setMessage("Camera geometry changed. Reacquiring confidence for two seconds…");
+      });
+      beginCalibration.addEventListener("click", async () => {
+        if (!stream) {
+          calibrationStatus.textContent = "Start the camera first.";
+          return;
+        }
+        const response = await fetch(`/api/calibration/reset?camera_id=${encodeURIComponent(cameraId)}`, { method: "POST" });
+        const result = await response.json();
+        calibrationStatus.textContent = response.ok ? "Session started · 0/12 accepted views" : result.detail;
+        captureCalibration.disabled = !response.ok;
+        finishCalibration.disabled = true;
+      });
+      captureCalibration.addEventListener("click", async () => {
+        if (!stream || video.readyState < 2) return;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
+        const response = await fetch(`/api/calibration/capture?camera_id=${encodeURIComponent(cameraId)}`, {
+          method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          calibrationStatus.textContent = result.detail;
+          return;
+        }
+        calibrationStatus.textContent = `${result.message} · ${result.views}/${result.required_views} views · ${result.corners} corners`;
+        finishCalibration.disabled = result.views < result.required_views;
+      });
+      finishCalibration.addEventListener("click", async () => {
+        const response = await fetch(`/api/calibration/finish?camera_id=${encodeURIComponent(cameraId)}`, { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) {
+          calibrationStatus.textContent = result.detail;
+          return;
+        }
+        calibrationStatus.textContent = `Saved · reprojection error ${result.reprojection_error_px.toFixed(3)} px`;
+        captureCalibration.disabled = true;
+        finishCalibration.disabled = true;
+        useIntrinsics.checked = true;
+        sendCameraIntrinsicsSetting();
       });
       simImage.addEventListener("contextmenu", event => event.preventDefault());
       simImage.addEventListener("pointerdown", event => {

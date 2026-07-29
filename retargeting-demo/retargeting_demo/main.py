@@ -34,6 +34,7 @@ def main() -> None:
     engaged_event = context.Event()
     frame_queue = context.Queue(maxsize=1)
     mode_queue = context.Queue(maxsize=1)
+    camera_config_queue = context.Queue(maxsize=1)
     target_queue = context.Queue(maxsize=1)
     pose_frame_queue = context.Queue(maxsize=1)
     sim_frame_queue = context.Queue(maxsize=1)
@@ -47,6 +48,7 @@ def main() -> None:
         args=(
             frame_queue,
             mode_queue,
+            camera_config_queue,
             target_queue,
             pose_frame_queue,
             perception_telemetry_queue,
@@ -77,6 +79,7 @@ def main() -> None:
     runtime = Runtime(
         frame_queue=frame_queue,
         mode_queue=mode_queue,
+        camera_config_queue=camera_config_queue,
         pose_frame_queue=pose_frame_queue,
         sim_frame_queue=sim_frame_queue,
         perception_telemetry_queue=perception_telemetry_queue,

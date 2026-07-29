@@ -74,6 +74,37 @@ camera context, and the browser asks for that Mac's camera permission.
 The simulation holds its last actuator command if targets become stale. Closing the
 browser or selecting **Stop** disengages new target application.
 
+## Camera intrinsics and calibration
+
+Enable **Use camera intrinsics** to reconstruct camera-space points before deriving
+limb directions. The checked path:
+
+1. Uses RTMW3D's original-image `keypoints_2d` as `(u, v)`.
+2. Undistorts them with the selected camera's matrix and distortion coefficients.
+3. Decodes SimCC Z into root-relative depth with `z_range = 2.1744869`.
+4. Estimates absolute root depth from the two shoulder rays by assuming a `0.38 m`
+   human shoulder width. It falls back to `2.5 m` only if there is no physically
+   valid solution between `0.5 m` and `6 m`.
+5. Backprojects each point with `X = (u-cx)/fx*Z`, `Y = (v-cy)/fy*Z`.
+6. Computes Euclidean shoulder-elbow and elbow-wrist directions.
+
+If no stored calibration matches the browser camera ID, the checked path uses zero
+distortion, a centered principal point, and a 60-degree horizontal field of view.
+The UI reports whether the active source is `calibrated` or
+`reasonable_default_60deg_hfov`. With the checkbox clear, the original SimCC proxy
+mapping remains active.
+
+For calibration, print `calibration-board-a4.pdf` at **100% / Actual size** on A4
+paper. Do not use Fit or Scale to page. Verify that every chessboard square measures
+exactly `24 mm`; markers are `18 mm`. The board is 7 by 10 squares and uses
+`DICT_5X5_100`. Mount it flat, then use the web calibration tool to capture at least
+12 views distributed around the image with varied distance and tilt. The provided
+`calibration-board-a4-300dpi.png` is the exact 300 DPI raster alternative.
+
+Calibrations are stored by a non-identifying hash of the browser camera device ID
+in `calibrations/cameras.json`. This file is tracked by Git, so review and commit
+new profiles after calibrating a camera.
+
 ## Coordinate and IK contract
 
 `RobotTarget` positions are expressed in metres in the model's `arm_origin` frame:

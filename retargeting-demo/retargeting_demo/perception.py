@@ -159,6 +159,7 @@ def _annotate(
 def perception_worker(
     frame_queue,
     mode_queue,
+    camera_config_queue,
     target_queue,
     pose_frame_queue,
     telemetry_queue,
@@ -187,11 +188,17 @@ def perception_worker(
     timeout_reported = False
     smoothed_fps = 0.0
     mode: RetargetMode = "both"
+    camera_config: dict[str, object] = {"enabled": False, "source": "disabled"}
     with target_log.open("a", encoding="utf-8", buffering=1) as output:
         while not stop_event.is_set() and os.getppid() == parent_pid:
             requested_mode = drain_latest(mode_queue)
             if requested_mode in RETARGET_MODES and requested_mode != mode:
                 mode = requested_mode
+                engaged_event.clear()
+                gate_state = gate.reset()
+            requested_camera_config = drain_latest(camera_config_queue)
+            if isinstance(requested_camera_config, dict):
+                camera_config = requested_camera_config
                 engaged_event.clear()
                 gate_state = gate.reset()
             if tracking_reset_event.is_set():
@@ -218,6 +225,10 @@ def perception_worker(
                             "device": device,
                             "backend": backend,
                             "mode": mode,
+                            "camera_intrinsics_enabled": bool(
+                                camera_config.get("enabled")
+                            ),
+                            "camera_intrinsics_source": camera_config.get("source"),
                             "engaged": False,
                             "tracking_state": gate_state.state,
                             "confidence_seconds": 0.0,
@@ -264,6 +275,12 @@ def perception_worker(
                     simcc=simcc,
                     scores=scores,
                     mode=mode,
+                    keypoints_2d=keypoints_2d,
+                    camera_intrinsics=(
+                        camera_config
+                        if bool(camera_config.get("enabled"))
+                        else None
+                    ),
                 )
                 gate_state = gate.update(True, time.monotonic_ns())
                 if gate_state.ready:
@@ -333,6 +350,11 @@ def perception_worker(
                     "device": device,
                     "backend": backend,
                     "mode": mode,
+                    "camera_intrinsics_enabled": bool(
+                        camera_config.get("enabled")
+                    ),
+                    "camera_intrinsics_source": camera_config.get("source"),
+                    "camera_profile_id": camera_config.get("profile_id"),
                     "engaged": gate_state.ready,
                     "tracking_state": gate_state.state,
                     "confidence_seconds": round(
