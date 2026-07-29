@@ -21,9 +21,14 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / ".assets" / "openarm_mujoco" / "v2" / "cell.xml"
+MODEL_PATH = (
+    ROOT.parent
+    / "retargeting-demo"
+    / "vendor"
+    / "openarm-v2"
+    / "cell.xml"
+)
 ARM_ACTUATORS = [
     f"{side}_joint{index}_ctrl"
     for side in ("left", "right")

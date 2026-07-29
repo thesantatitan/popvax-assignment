@@ -5,12 +5,11 @@ from pathlib import Path
 import mujoco
 import mujoco.viewer
 
-
 MODEL_PATH = (
-    Path(__file__).resolve().parent
-    / ".assets"
-    / "openarm_mujoco"
-    / "v2"
+    Path(__file__).resolve().parent.parent
+    / "retargeting-demo"
+    / "vendor"
+    / "openarm-v2"
     / "cell.xml"
 )
 

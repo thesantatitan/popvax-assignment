@@ -22,11 +22,9 @@ from .ipc import configure_parent_death_signal, drain_latest, put_latest
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
-    ROOT.parent
-    / "openarm-mujoco"
-    / ".assets"
-    / "openarm_mujoco"
-    / "v2"
+    ROOT
+    / "vendor"
+    / "openarm-v2"
     / "cell.xml"
 )
 SIDES = ("left", "right")
@@ -246,9 +244,7 @@ def simulation_worker(
     parent_pid = configure_parent_death_signal()
     model_path = Path(os.getenv("OPENARM_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
     if not model_path.is_file():
-        raise FileNotFoundError(
-            f"OpenArm model not found at {model_path}. Run ../openarm-mujoco/setup.sh."
-        )
+        raise FileNotFoundError(f"OpenArm model not found at {model_path}")
     model = mujoco.MjModel.from_xml_path(str(model_path))
     model.vis.global_.offwidth = width
     model.vis.global_.offheight = height

@@ -14,11 +14,9 @@ MODEL = Path(
     os.getenv(
         "OPENARM_MODEL_PATH",
         str(
-            ROOT.parent
-            / "openarm-mujoco"
-            / ".assets"
-            / "openarm_mujoco"
-            / "v2"
+            ROOT
+            / "vendor"
+            / "openarm-v2"
             / "cell.xml"
         ),
     )

@@ -5,9 +5,14 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / ".assets" / "openarm_mujoco" / "v2" / "cell.xml"
+MODEL_PATH = (
+    ROOT.parent
+    / "retargeting-demo"
+    / "vendor"
+    / "openarm-v2"
+    / "cell.xml"
+)
 ARM_JOINTS = [
     f"openarm_{side}_joint{index}"
     for side in ("left", "right")
@@ -30,7 +35,7 @@ def named_ids(model: mujoco.MjModel, object_type: mujoco.mjtObj, names: list[str
 
 def main() -> None:
     if not MODEL_PATH.is_file():
-        raise FileNotFoundError(f"OpenArm model not found: {MODEL_PATH}. Run ./setup.sh first.")
+        raise FileNotFoundError(f"OpenArm model not found: {MODEL_PATH}")
 
     model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
     data = mujoco.MjData(model)

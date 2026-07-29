@@ -5,9 +5,9 @@ This subfolder provides the assessment's simulation baseline: OpenArm v2 bimanua
 geometry and joint limits, and a verification that the arms move through actuators
 while MuJoCo steps physics.
 
-The official assets are fetched at the pinned OpenArm commit
-`8955afb54e4adfb59a236e2b4d15192b7a02865c` into the ignored `.assets/`
-directory. This avoids modifying the upstream model while keeping setup reproducible.
+The official assets are tracked in `../retargeting-demo/vendor/openarm-v2` at pinned
+OpenArm commit `8955afb54e4adfb59a236e2b4d15192b7a02865c`. Setup does not clone or
+download a separate model checkout.
 
 ## WSL setup
 
@@ -20,7 +20,7 @@ chmod +x setup.sh
 ```
 
 The setup uses `uv`, creates a local `.venv`, installs the versions in `uv.lock`,
-fetches the pinned OpenArm files, and runs the headless validation.
+and runs the headless validation against the tracked vendor model.
 
 ## Launch
 
