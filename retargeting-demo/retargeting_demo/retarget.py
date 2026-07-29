@@ -22,6 +22,8 @@ HOME_WRIST_ROTATION = np.array(
     [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]],
     dtype=np.float64,
 )
+HOME_UPPER_DIRECTION = np.array([0.0, 0.0, -1.0])
+HOME_FOREARM_DIRECTION = np.array([1.0, 0.0, 0.0])
 
 # RTMW3D: +x image-right, +y image-down, +z depth. OpenArm arm_origin:
 # +x forward into the cell, +y robot-left, +z up.
@@ -36,6 +38,33 @@ def _unit(vector: np.ndarray) -> np.ndarray:
     if not np.isfinite(norm) or norm < 1e-6:
         raise ValueError("Degenerate limb or hand direction")
     return vector / norm
+
+
+def _rotation_between(source: np.ndarray, destination: np.ndarray) -> np.ndarray:
+    """Return the minimum rotation taking one unit direction to another."""
+
+    source = _unit(source)
+    destination = _unit(destination)
+    cross = np.cross(source, destination)
+    sine = float(np.linalg.norm(cross))
+    cosine = float(np.clip(np.dot(source, destination), -1.0, 1.0))
+    if sine < 1e-8:
+        if cosine > 0.0:
+            return np.eye(3)
+        basis = np.array([1.0, 0.0, 0.0])
+        if abs(source[0]) > 0.8:
+            basis = np.array([0.0, 1.0, 0.0])
+        axis = _unit(np.cross(source, basis))
+        return 2.0 * np.outer(axis, axis) - np.eye(3)
+    axis = cross / sine
+    skew = np.array(
+        [
+            [0.0, -axis[2], axis[1]],
+            [axis[2], 0.0, -axis[0]],
+            [-axis[1], axis[0], 0.0],
+        ]
+    )
+    return np.eye(3) + sine * skew + (1.0 - cosine) * (skew @ skew)
 
 
 def simcc_to_camera_points(simcc: np.ndarray) -> np.ndarray:
@@ -85,6 +114,7 @@ class SimccRetargeter:
         self.last_rotations = {
             side: HOME_WRIST_ROTATION.copy() for side in ("left", "right")
         }
+        self.limb_reference: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self.last_directions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     @property
@@ -93,6 +123,7 @@ class SimccRetargeter:
 
     def clear_calibration(self) -> None:
         self.hand_reference.clear()
+        self.limb_reference.clear()
         self.last_directions.clear()
 
     def select_person(self, scores: np.ndarray) -> int:
@@ -144,8 +175,26 @@ class SimccRetargeter:
             shoulder = robot_points[indices["shoulder"]]
             elbow = robot_points[indices["elbow"]]
             wrist = robot_points[indices["wrist"]]
-            upper_direction = _unit(elbow - shoulder)
-            forearm_direction = _unit(wrist - elbow)
+            measured_upper = _unit(elbow - shoulder)
+            measured_forearm = _unit(wrist - elbow)
+            if calibrate:
+                self.limb_reference[side] = (
+                    measured_upper.copy(),
+                    measured_forearm.copy(),
+                )
+            if side in self.limb_reference:
+                reference_upper, reference_forearm = self.limb_reference[side]
+                upper_direction = (
+                    _rotation_between(reference_upper, measured_upper)
+                    @ HOME_UPPER_DIRECTION
+                )
+                forearm_direction = (
+                    _rotation_between(reference_forearm, measured_forearm)
+                    @ HOME_FOREARM_DIRECTION
+                )
+            else:
+                upper_direction = measured_upper
+                forearm_direction = measured_forearm
             if side in self.last_directions and not calibrate:
                 previous_upper, previous_forearm = self.last_directions[side]
                 alpha = self.smoothing_alpha

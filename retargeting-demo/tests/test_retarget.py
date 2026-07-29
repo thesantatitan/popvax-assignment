@@ -67,6 +67,16 @@ def test_retargeting_has_robot_segment_lengths_and_rotation() -> None:
         rotation = np.asarray(arm.wrist_rotation).reshape(3, 3)
         assert np.isclose(np.linalg.norm(elbow - shoulder), UPPER_ARM_LENGTH_M)
         assert np.isclose(np.linalg.norm(wrist - elbow), FOREARM_LENGTH_M)
+        np.testing.assert_allclose(
+            elbow,
+            shoulder + np.array([0.0, 0.0, -UPPER_ARM_LENGTH_M]),
+            atol=1e-7,
+        )
+        np.testing.assert_allclose(
+            wrist,
+            elbow + np.array([FOREARM_LENGTH_M, 0.0, 0.0]),
+            atol=1e-7,
+        )
         np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-7)
 
 

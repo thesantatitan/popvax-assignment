@@ -80,6 +80,8 @@ browser or selecting **Stop** disengages new target application.
 - RTMW3D decoded SimCC coordinates supply relative shoulder-elbow-wrist directions.
 - Human segment magnitude is discarded; directions are scaled to the OpenArm's
   measured 0.220 m upper arm and 0.216 m forearm.
+- Calibration maps the operator's neutral limb directions onto the collision-safe
+  OpenArm home configuration; later targets apply relative segment rotations.
 - Wrist orientation comes from the wrist and four MCP landmarks. Calibration maps
   the neutral human hand frames to the OpenArm home tool frames.
 - IK minimizes elbow position, end-effector position, and end-effector orientation
