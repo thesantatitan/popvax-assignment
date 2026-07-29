@@ -137,13 +137,12 @@
           Each chessboard square must measure exactly 24 mm. Mount it flat.
         </p>
         <p>
-          Capture at least 12 sharply focused views while moving the board around the
-          frame and changing its tilt. Keep the full board visible where possible.
+          Select Begin once, then slowly move and tilt the board around the image.
+          The tool automatically captures 12 sufficiently different sharp views,
+          rejects duplicates, saves the calibration, and tells you when it is done.
         </p>
         <div class="calibration-tools">
-          <button id="beginCalibration" class="secondary">Begin calibration</button>
-          <button id="captureCalibration" class="secondary" disabled>Capture view</button>
-          <button id="finishCalibration" class="secondary" disabled>Save calibration</button>
+          <button id="beginCalibration" class="secondary">Begin automatic calibration</button>
           <span id="calibrationStatus">No calibration session active.</span>
         </div>
       </details>
@@ -210,8 +209,6 @@
       const retargetMode = document.getElementById("retargetMode");
       const useIntrinsics = document.getElementById("useIntrinsics");
       const beginCalibration = document.getElementById("beginCalibration");
-      const captureCalibration = document.getElementById("captureCalibration");
-      const finishCalibration = document.getElementById("finishCalibration");
       const calibrationStatus = document.getElementById("calibrationStatus");
       const intrinsicsStatus = document.getElementById("intrinsicsStatus");
       const connection = document.getElementById("connection");
@@ -226,6 +223,7 @@
       let cameraPending = null;
       let cameraScheduled = false;
       let cameraId = "";
+      let calibrationActive = false;
 
       function setMessage(text) { message.textContent = text; }
       function value(id, text) { document.getElementById(id).textContent = text; }
@@ -324,6 +322,8 @@
         requestAnimationFrame(captureNext);
       }
       function stop() {
+        calibrationActive = false;
+        beginCalibration.disabled = false;
         stopped = true;
         awaitingPose = false;
         sendCommand({ action: "disengage" });
@@ -406,37 +406,48 @@
         const response = await fetch(`/api/calibration/reset?camera_id=${encodeURIComponent(cameraId)}`, { method: "POST" });
         const result = await response.json();
         calibrationStatus.textContent = response.ok ? "Session started · 0/12 accepted views" : result.detail;
-        captureCalibration.disabled = !response.ok;
-        finishCalibration.disabled = true;
+        if (!response.ok) return;
+        calibrationActive = true;
+        beginCalibration.disabled = true;
+        runAutomaticCalibration();
       });
-      captureCalibration.addEventListener("click", async () => {
-        if (!stream || video.readyState < 2) return;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
-        const response = await fetch(`/api/calibration/capture?camera_id=${encodeURIComponent(cameraId)}`, {
-          method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,
-        });
-        const result = await response.json();
-        if (!response.ok) {
-          calibrationStatus.textContent = result.detail;
-          return;
-        }
-        calibrationStatus.textContent = `${result.message} · ${result.views}/${result.required_views} views · ${result.corners} corners`;
-        finishCalibration.disabled = result.views < result.required_views;
-      });
-      finishCalibration.addEventListener("click", async () => {
+      async function finishAutomaticCalibration() {
         const response = await fetch(`/api/calibration/finish?camera_id=${encodeURIComponent(cameraId)}`, { method: "POST" });
         const result = await response.json();
         if (!response.ok) {
           calibrationStatus.textContent = result.detail;
+          calibrationActive = false;
+          beginCalibration.disabled = false;
           return;
         }
-        calibrationStatus.textContent = `Saved · reprojection error ${result.reprojection_error_px.toFixed(3)} px`;
-        captureCalibration.disabled = true;
-        finishCalibration.disabled = true;
+        calibrationStatus.textContent = `Calibration complete and saved · reprojection error ${result.reprojection_error_px.toFixed(3)} px`;
+        calibrationActive = false;
+        beginCalibration.disabled = false;
         useIntrinsics.checked = true;
         sendCameraIntrinsicsSetting();
-      });
+      }
+      async function runAutomaticCalibration() {
+        while (calibrationActive && stream && video.readyState >= 2) {
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
+          const response = await fetch(`/api/calibration/capture?camera_id=${encodeURIComponent(cameraId)}`, {
+            method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob,
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            calibrationStatus.textContent = result.detail;
+            calibrationActive = false;
+            beginCalibration.disabled = false;
+            return;
+          }
+          calibrationStatus.textContent = `${result.message} · ${result.views}/${result.required_views} accepted · ${result.corners} corners`;
+          if (result.views >= result.required_views) {
+            await finishAutomaticCalibration();
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
       simImage.addEventListener("contextmenu", event => event.preventDefault());
       simImage.addEventListener("pointerdown", event => {
         if (event.button !== 0 && event.button !== 2) return;

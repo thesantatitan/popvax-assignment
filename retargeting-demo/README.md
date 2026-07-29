@@ -96,8 +96,11 @@ For calibration, print `calibration-board-a4.pdf` at **100% / Actual size** on A
 paper. Do not use Fit or Scale to page. Verify that every chessboard square measures
 exactly `24 mm`; markers are `18 mm`. The board is 7 by 10 squares and uses
 `DICT_5X5_100`. Mount it flat, then use the web calibration tool to capture at least
-12 views distributed around the image with varied distance and tilt. The provided
-`calibration-board-a4-300dpi.png` is the exact 300 DPI raster alternative.
+12 views distributed around the image with varied distance and tilt. After selecting
+**Begin automatic calibration**, capture is hands-free: near-duplicate views are
+rejected, and the profile is calibrated, saved, and enabled automatically after 12
+accepted views. The provided `calibration-board-a4-300dpi.png` is the exact 300 DPI
+raster alternative.
 
 Calibrations are stored by a non-identifying hash of the browser camera device ID
 in `calibrations/cameras.json`. This file is tracked by Git, so review and commit

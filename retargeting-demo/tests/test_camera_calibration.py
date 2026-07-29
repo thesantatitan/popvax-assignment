@@ -65,6 +65,14 @@ def test_printed_board_is_detectable() -> None:
     assert success["accepted"]
     assert success["corners"] == 54
 
+    duplicate = CharucoCalibrationSession()
+    first = duplicate.capture(cv2.imencode(".jpg", image)[1].tobytes())
+    second = duplicate.capture(cv2.imencode(".jpg", image)[1].tobytes())
+    assert first["accepted"]
+    assert not second["accepted"]
+    assert second["views"] == 1
+    assert "too similar" in second["message"]
+
 
 def test_shoulder_width_recovers_root_depth() -> None:
     root_depth = 2.0
