@@ -5,8 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-RetargetMode = Literal["elbow", "end_effector", "both"]
-RETARGET_MODES: tuple[RetargetMode, ...] = ("elbow", "end_effector", "both")
+RetargetMode = Literal[
+    "elbow", "end_effector", "both", "both_orientation"
+]
+RETARGET_MODES: tuple[RetargetMode, ...] = (
+    "elbow",
+    "end_effector",
+    "both",
+    "both_orientation",
+)
+ELBOW_MODES = frozenset({"elbow", "both", "both_orientation"})
+WRIST_MODES = frozenset({"end_effector", "both", "both_orientation"})
+ORIENTATION_MODES = frozenset({"both_orientation"})
 
 
 @dataclass(frozen=True, slots=True)

@@ -67,9 +67,11 @@ camera context, and the browser asks for that Mac's camera permission.
 ## Operator procedure
 
 1. Select **Start camera** and allow camera access.
-2. Select **Elbow only**, **End effector only**, or **Elbow + end effector**.
+2. Select **Elbow only**, **End effector only**, **Elbow + end effector**, or
+   **Elbow + end effector + orientation**.
 3. Face the camera with both shoulders and elbows visible; wrist visibility is
-   additionally required for modes that track the end effector.
+   additionally required for modes that track the end effector, and hand
+   landmarks are required only for the orientation mode.
 4. Keep every required keypoint confidently visible for two continuous seconds.
 5. Tracking engages automatically. If confidence drops, the robot holds its last
    pose and requires another continuous two-second confident interval.
@@ -122,12 +124,14 @@ new profiles after calibrating a camera.
   there is no neutral-pose calibration or relative-motion offset.
 - Wrist, index-, middle-, ring-, and little-finger MCP landmarks define an
   absolute right-handed palm frame. Its orientation is filtered with the same
-  Cartesian time constant and tracked by Mink whenever the selected mode
-  includes the end effector.
+  Cartesian time constant and tracked by Mink only in **Elbow + end effector +
+  orientation** mode.
 - **Elbow only** uses only the elbow-position residual and body Jacobian.
 - **End effector only** uses only the end-effector-position residual and site
   Jacobian.
 - **Elbow + end effector** stacks both position residuals and Jacobians.
+- **Elbow + end effector + orientation** stacks both position residuals and the
+  wrist-orientation residual.
 - The normalized Cartesian limb directions are exponentially filtered before IK.
   Mink solves both arms together with configuration and velocity constraints plus
   a previous-posture objective. Its solution is exponentially filtered again

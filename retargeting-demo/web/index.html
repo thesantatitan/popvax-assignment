@@ -145,6 +145,7 @@
             <option value="elbow">Elbow only</option>
             <option value="end_effector">End effector only</option>
             <option value="both" selected>Elbow + end effector</option>
+            <option value="both_orientation">Elbow + end effector + orientation</option>
           </select>
         </label>
         <label class="control" for="useIntrinsics">
@@ -241,7 +242,7 @@
         Stand facing the camera with the landmarks required by the selected mode visible.
         Tracking engages automatically after every required keypoint remains confident for
         two continuous seconds. Hand landmarks set the absolute end-effector orientation
-        whenever the selected mode includes the wrist. Low confidence holds the last robot pose.
+        only in the orientation mode. Low confidence holds the last robot pose.
       </p>
 
       <canvas id="capture"></canvas>

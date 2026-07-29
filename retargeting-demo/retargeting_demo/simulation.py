@@ -19,7 +19,13 @@ import numpy as np
 import qpsolvers
 from PIL import Image
 
-from .contracts import RenderedFrame, RobotTarget
+from .contracts import (
+    ELBOW_MODES,
+    ORIENTATION_MODES,
+    WRIST_MODES,
+    RenderedFrame,
+    RobotTarget,
+)
 from .ipc import configure_parent_death_signal, drain_latest, put_latest
 from .retarget import exponential_smoothing_alpha
 
@@ -234,7 +240,7 @@ class BimanualIk:
         tasks: list[mink.tasks.BaseTask] = [self.posture_task]
         for side in SIDES:
             arm_target = getattr(target, side)
-            if target.mode in {"elbow", "both"}:
+            if target.mode in ELBOW_MODES:
                 elbow_target, _ = self._base_to_world(
                     np.asarray(arm_target.elbow_position_m), np.eye(3)
                 )
@@ -242,12 +248,15 @@ class BimanualIk:
                     mink.SE3.from_translation(elbow_target)
                 )
                 tasks.append(self.elbow_tasks[side])
-            if target.mode in {"end_effector", "both"}:
+            if target.mode in WRIST_MODES:
                 if arm_target.wrist_position_m is None:
                     raise ValueError(
                         f"{target.mode} target is missing wrist_position_m"
                     )
-                if arm_target.wrist_rotation is not None:
+                if (
+                    target.mode in ORIENTATION_MODES
+                    and arm_target.wrist_rotation is not None
+                ):
                     wrist_target, wrist_rotation = self._base_to_world(
                         np.asarray(arm_target.wrist_position_m),
                         np.asarray(arm_target.wrist_rotation).reshape(3, 3),
@@ -290,7 +299,7 @@ class BimanualIk:
         for side in SIDES:
             arm_target = getattr(target, side)
             side_residuals: dict[str, float] = {}
-            if target.mode in {"elbow", "both"}:
+            if target.mode in ELBOW_MODES:
                 elbow_target, _ = self._base_to_world(
                     np.asarray(arm_target.elbow_position_m), np.eye(3)
                 )
@@ -299,7 +308,7 @@ class BimanualIk:
                         elbow_target - self.data.xpos[self.elbow_bodies[side]]
                     )
                 )
-            if target.mode in {"end_effector", "both"}:
+            if target.mode in WRIST_MODES:
                 if arm_target.wrist_position_m is None:
                     raise ValueError(
                         f"{target.mode} target is missing wrist_position_m"
@@ -312,7 +321,10 @@ class BimanualIk:
                         wrist_target - self.data.site_xpos[self.wrist_sites[side]]
                     )
                 )
-                if arm_target.wrist_rotation is not None:
+                if (
+                    target.mode in ORIENTATION_MODES
+                    and arm_target.wrist_rotation is not None
+                ):
                     wrist_rotation_target = np.asarray(
                         arm_target.wrist_rotation
                     ).reshape(3, 3)
@@ -419,7 +431,10 @@ class BimanualIk:
                             wrist - np.asarray(desired.wrist_position_m)
                         )
                     )
-                if desired.wrist_rotation is not None:
+                if (
+                    target.mode in ORIENTATION_MODES
+                    and desired.wrist_rotation is not None
+                ):
                     desired_rotation = np.asarray(
                         desired.wrist_rotation
                     ).reshape(3, 3)

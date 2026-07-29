@@ -8,7 +8,14 @@ from dataclasses import asdict
 import cv2
 import numpy as np
 
-from .contracts import RETARGET_MODES, ArmTarget, RetargetMode, RobotTarget
+from .contracts import (
+    ORIENTATION_MODES,
+    RETARGET_MODES,
+    WRIST_MODES,
+    ArmTarget,
+    RetargetMode,
+    RobotTarget,
+)
 
 BODY = {
     "left": {"shoulder": 5, "elbow": 7, "wrist": 9, "hand_start": 91},
@@ -49,8 +56,9 @@ def required_keypoint_indices(mode: RetargetMode) -> list[int]:
     required: list[int] = []
     for indices in BODY.values():
         required.extend([indices["shoulder"], indices["elbow"]])
-        if mode != "elbow":
+        if mode in WRIST_MODES:
             required.append(indices["wrist"])
+        if mode in ORIENTATION_MODES:
             required.extend(
                 indices["hand_start"] + offset
                 for offset in HAND_FRAME_OFFSETS
@@ -271,8 +279,9 @@ class SimccRetargeter:
 
         for side, indices in BODY.items():
             required = [indices["shoulder"], indices["elbow"]]
-            if mode != "elbow":
+            if mode in WRIST_MODES:
                 required.append(indices["wrist"])
+            if mode in ORIENTATION_MODES:
                 required.extend(
                     indices["hand_start"] + offset
                     for offset in HAND_FRAME_OFFSETS
@@ -307,7 +316,7 @@ class SimccRetargeter:
 
             wrist_target: np.ndarray | None = None
             wrist_rotation: np.ndarray | None = None
-            if mode != "elbow":
+            if mode in WRIST_MODES:
                 wrist = robot_points[indices["wrist"]]
                 forearm_direction = _unit(wrist - elbow)
                 if side in self.last_forearm_directions:
@@ -320,19 +329,21 @@ class SimccRetargeter:
                 wrist_target = (
                     elbow_target + FOREARM_LENGTH_M * forearm_direction
                 )
-                wrist_rotation = hand_frame(
-                    robot_points, indices["hand_start"], side
-                )
-                if side in self.last_hand_rotations:
-                    wrist_rotation = smooth_rotation(
-                        self.last_hand_rotations[side],
-                        wrist_rotation,
-                        smoothing_alpha,
+                if mode in ORIENTATION_MODES:
+                    wrist_rotation = hand_frame(
+                        robot_points, indices["hand_start"], side
                     )
-                self.last_hand_rotations[side] = wrist_rotation.copy()
+                    if side in self.last_hand_rotations:
+                        wrist_rotation = smooth_rotation(
+                            self.last_hand_rotations[side],
+                            wrist_rotation,
+                            smoothing_alpha,
+                        )
+                    self.last_hand_rotations[side] = wrist_rotation.copy()
             required = [indices["shoulder"], indices["elbow"]]
-            if mode != "elbow":
+            if mode in WRIST_MODES:
                 required.append(indices["wrist"])
+            if mode in ORIENTATION_MODES:
                 required.extend(
                     indices["hand_start"] + offset
                     for offset in HAND_FRAME_OFFSETS

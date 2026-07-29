@@ -126,10 +126,7 @@ def test_retargeting_has_robot_segment_lengths() -> None:
         elbow = np.asarray(arm.elbow_position_m)
         wrist = np.asarray(arm.wrist_position_m)
         assert arm.wrist_position_m is not None
-        assert arm.wrist_rotation is not None
-        rotation = np.asarray(arm.wrist_rotation).reshape(3, 3)
-        np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-7)
-        assert np.linalg.det(rotation) == pytest.approx(1.0)
+        assert arm.wrist_rotation is None
         assert np.isclose(np.linalg.norm(elbow - shoulder), UPPER_ARM_LENGTH_M)
         assert np.isclose(np.linalg.norm(wrist - elbow), FOREARM_LENGTH_M)
         measured_upper = (
@@ -160,6 +157,15 @@ def test_hand_confidence_is_required_only_for_end_effector_modes() -> None:
         mode="elbow",
     )
     assert elbow_target.left.wrist_rotation is None
+    position_target = SimccRetargeter().make_target(
+        sequence=1,
+        capture_time_ns=1,
+        inference_time_ns=2,
+        simcc=simcc,
+        scores=scores,
+        mode="both",
+    )
+    assert position_target.left.wrist_rotation is None
 
     with pytest.raises(ValueError, match="hand confidence"):
         SimccRetargeter().make_target(
@@ -168,13 +174,14 @@ def test_hand_confidence_is_required_only_for_end_effector_modes() -> None:
             inference_time_ns=2,
             simcc=simcc,
             scores=scores,
-            mode="both",
+            mode="both_orientation",
         )
 
 
 def test_modes_require_only_the_landmarks_they_control() -> None:
     assert required_keypoint_indices("elbow") == [5, 6, 7, 8]
-    end_effector_indices = [
+    end_effector_indices = [5, 6, 7, 8, 9, 10]
+    orientation_indices = [
         5,
         6,
         7,
@@ -194,6 +201,10 @@ def test_modes_require_only_the_landmarks_they_control() -> None:
     ]
     assert required_keypoint_indices("end_effector") == end_effector_indices
     assert required_keypoint_indices("both") == end_effector_indices
+    assert (
+        required_keypoint_indices("both_orientation")
+        == orientation_indices
+    )
 
     simcc, scores = synthetic_pose()
     scores[0, BODY["left"]["wrist"]] = 0.1
@@ -207,7 +218,7 @@ def test_modes_require_only_the_landmarks_they_control() -> None:
     )
     assert elbow_target.left.wrist_position_m is None
 
-    for mode in ("end_effector", "both"):
+    for mode in ("end_effector", "both", "both_orientation"):
         try:
             SimccRetargeter().make_target(
                 sequence=2,
@@ -221,6 +232,25 @@ def test_modes_require_only_the_landmarks_they_control() -> None:
             assert "confidence" in str(error)
         else:
             raise AssertionError(f"{mode} should require wrist confidence")
+
+
+def test_orientation_mode_produces_valid_hand_rotations() -> None:
+    simcc, scores = synthetic_pose()
+    target = SimccRetargeter().make_target(
+        sequence=8,
+        capture_time_ns=100,
+        inference_time_ns=200,
+        simcc=simcc,
+        scores=scores,
+        mode="both_orientation",
+    )
+
+    for side in ("left", "right"):
+        rotation_values = getattr(target, side).wrist_rotation
+        assert rotation_values is not None
+        rotation = np.asarray(rotation_values).reshape(3, 3)
+        np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1e-7)
+        assert np.linalg.det(rotation) == pytest.approx(1.0)
 
 
 def test_target_record_includes_selected_simcc_keypoints() -> None:

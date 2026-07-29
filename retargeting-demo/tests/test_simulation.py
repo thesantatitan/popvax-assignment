@@ -166,7 +166,7 @@ def test_mink_tracks_end_effector_orientation() -> None:
         sequence=45,
         capture_time_ns=1,
         inference_time_ns=2,
-        mode="end_effector",
+        mode="both_orientation",
         camera_intrinsics_enabled=False,
         camera_intrinsics_source=None,
         estimated_root_depth_m=None,
@@ -180,3 +180,40 @@ def test_mink_tracks_end_effector_orientation() -> None:
     assert ik.last_diagnostics["status"] == "converged"
     assert ik.last_diagnostics["maximum_residual_m"] < 0.01
     assert ik.last_diagnostics["maximum_orientation_residual_rad"] < 0.01
+
+
+def test_position_only_mode_ignores_supplied_orientation() -> None:
+    model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
+    data = mujoco.MjData(model)
+    _initialize_model(model, data)
+    ik = BimanualIk(model, data)
+    achieved = ik.achieved_state(data, None)
+    arms = {}
+    for side in ("left", "right"):
+        rotation = np.asarray(achieved[side]["wrist_rotation"]).reshape(3, 3)
+        arms[side] = ArmTarget(
+            elbow_position_m=tuple(achieved[side]["elbow_position_m"]),
+            wrist_position_m=tuple(achieved[side]["wrist_position_m"]),
+            confidence=1.0,
+            wrist_rotation=tuple(rotation.reshape(-1)),
+        )
+    target = RobotTarget(
+        sequence=46,
+        capture_time_ns=1,
+        inference_time_ns=2,
+        mode="both",
+        camera_intrinsics_enabled=False,
+        camera_intrinsics_source=None,
+        estimated_root_depth_m=None,
+        left=arms["left"],
+        right=arms["right"],
+    )
+
+    ik.solve(target, data.qpos)
+
+    assert ik.last_diagnostics is not None
+    assert ik.last_diagnostics["maximum_orientation_residual_rad"] == 0.0
+    for side in ("left", "right"):
+        assert "wrist_orientation_rad" not in (
+            ik.last_diagnostics["residuals"][side]
+        )
