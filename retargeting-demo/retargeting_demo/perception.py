@@ -164,6 +164,7 @@ def perception_worker(
 ) -> None:
     """Process entrypoint. CUDA and TensorRT are initialized only in this process."""
 
+    parent_pid = os.getppid()
     tracker, device, backend = _make_tracker()
     retargeter = SimccRetargeter(
         confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35"))
@@ -174,7 +175,7 @@ def perception_worker(
     last_tick = time.perf_counter()
     smoothed_fps = 0.0
     with target_log.open("a", encoding="utf-8", buffering=1) as output:
-        while not stop_event.is_set():
+        while not stop_event.is_set() and os.getppid() == parent_pid:
             incoming = drain_latest(frame_queue)
             if incoming is None:
                 time.sleep(0.002)

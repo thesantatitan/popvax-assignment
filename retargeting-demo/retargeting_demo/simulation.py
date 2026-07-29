@@ -223,6 +223,7 @@ def simulation_worker(
     sim_frame_queue,
     telemetry_queue,
     camera_queue,
+    engaged_event,
     stop_event,
     log_directory: str,
     width: int,
@@ -231,6 +232,7 @@ def simulation_worker(
 ) -> None:
     """Process entrypoint. MuJoCo steps independently from web and inference."""
 
+    parent_pid = os.getppid()
     model_path = Path(os.getenv("OPENARM_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
     if not model_path.is_file():
         raise FileNotFoundError(
@@ -266,7 +268,7 @@ def simulation_worker(
         "a", encoding="utf-8", buffering=1
     ) as output:
         with mujoco.Renderer(model, height=height, width=width) as renderer:
-            while not stop_event.is_set():
+            while not stop_event.is_set() and os.getppid() == parent_pid:
                 now = time.monotonic()
                 incoming = drain_latest(target_queue)
                 if incoming is not None:
@@ -274,6 +276,9 @@ def simulation_worker(
                     target_dirty = True
                     latest_sequence = incoming.sequence
                     last_target_wall = now
+                if not engaged_event.is_set():
+                    active_target = None
+                    target_dirty = False
 
                 if now >= next_control:
                     max_delta = 3.0 * control_period

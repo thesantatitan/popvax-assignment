@@ -62,6 +62,7 @@ def main() -> None:
             sim_frame_queue,
             simulation_telemetry_queue,
             camera_queue,
+            engaged_event,
             stop_event,
             str(args.log_directory),
             args.sim_width,
