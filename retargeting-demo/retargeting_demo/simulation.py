@@ -22,11 +22,9 @@ from .ipc import configure_parent_death_signal, drain_latest, put_latest
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
-    ROOT.parent
-    / "openarm-mujoco"
-    / ".assets"
-    / "openarm_mujoco"
-    / "v2"
+    ROOT
+    / "vendor"
+    / "openarm-v2"
     / "cell.xml"
 )
 SIDES = ("left", "right")

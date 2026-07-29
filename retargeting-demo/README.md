@@ -18,14 +18,7 @@ are dropped instead of adding latency.
 
 ## WSL setup
 
-First set up the existing OpenArm assets:
-
-```bash
-cd /home/dev/popvax-assignment/openarm-mujoco
-./setup.sh
-```
-
-Then install and verify the combined Python 3.11 environment with `uv`:
+Install and verify the combined Python 3.11 environment with `uv`:
 
 ```bash
 cd /home/dev/popvax-assignment/retargeting-demo
@@ -40,6 +33,11 @@ The default TensorRT engine is:
 ```
 
 Override it with `RTMW3D_TRT_ENGINE` if needed.
+
+The editable OpenArm v2 model and its meshes are included under
+`vendor/openarm-v2`; setup does not clone another model repository. The original
+Apache-2.0 license is included there. This demo removes the vertical lifter slide
+and fixes the bimanual assembly at the center of its former travel.
 
 ## Launch
 
