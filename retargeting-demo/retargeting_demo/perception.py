@@ -24,6 +24,7 @@ REPOSITORY_ROOT = ROOT.parent
 RTMW3D_DEMO = REPOSITORY_ROOT / "rtmw3d-livewebcam"
 sys.path.insert(0, str(RTMW3D_DEMO))
 
+from demo import draw_3d_inset
 from roi_tracker import PersistentRoiPoseTracker
 from tensorrt_backend import RTMPose3d as TensorRTPose3d
 
@@ -121,6 +122,7 @@ def _make_tracker() -> tuple[PersistentRoiPoseTracker, str, str]:
 
 def _annotate(
     frame: np.ndarray,
+    keypoints_3d: np.ndarray,
     keypoints_2d: np.ndarray,
     scores: np.ndarray,
     status: str,
@@ -134,6 +136,7 @@ def _annotate(
             openpose_skeleton=False,
             kpt_thr=0.35,
         )
+    draw_3d_inset(rendered, keypoints_3d, scores, 0.35)
     cv2.rectangle(rendered, (0, 0), (rendered.shape[1], 42), (14, 20, 28), -1)
     cv2.putText(
         rendered,
@@ -227,6 +230,7 @@ def perception_worker(
             if frame is None:
                 continue
 
+            keypoints_3d = np.empty((0, 133, 3), dtype=np.float32)
             keypoints_2d = np.empty((0, 133, 2), dtype=np.float32)
             scores = np.empty((0, 133), dtype=np.float32)
             people = 0
@@ -236,7 +240,8 @@ def perception_worker(
                 result = tracker(frame)
                 if not isinstance(result, tuple) or len(result) != 4:
                     raise ValueError("RTMW3D did not return a valid pose")
-                _keypoints_3d, scores_raw, simcc_raw, keypoints_2d_raw = result
+                keypoints_3d_raw, scores_raw, simcc_raw, keypoints_2d_raw = result
+                keypoints_3d = np.asarray(keypoints_3d_raw)
                 scores = np.asarray(scores_raw)
                 simcc = np.asarray(simcc_raw)
                 keypoints_2d = np.asarray(keypoints_2d_raw)
@@ -295,7 +300,9 @@ def perception_worker(
                 f"RTMW3D {backend} | {mode} | {smoothed_fps:.1f} FPS | "
                 f"{processing_ms:.0f} ms"
             )
-            annotated = _annotate(frame, keypoints_2d, scores, status)
+            annotated = _annotate(
+                frame, keypoints_3d, keypoints_2d, scores, status
+            )
             put_latest(
                 pose_frame_queue,
                 RenderedFrame(sequence=incoming.sequence, jpeg=annotated),

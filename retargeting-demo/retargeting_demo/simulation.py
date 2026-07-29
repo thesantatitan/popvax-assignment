@@ -39,15 +39,16 @@ def _object_id(model: mujoco.MjModel, kind: mujoco.mjtObj, name: str) -> int:
     return result
 
 
-def _orientation_error(target: np.ndarray, current: np.ndarray) -> np.ndarray:
-    relative = target @ current.T
-    return 0.5 * np.array(
-        [
-            relative[2, 1] - relative[1, 2],
-            relative[0, 2] - relative[2, 0],
-            relative[1, 0] - relative[0, 1],
-        ]
-    )
+def exponential_smoothing_alpha(period_s: float, time_constant_s: float) -> float:
+    """Return a rate-independent exponential smoothing coefficient."""
+
+    if period_s <= 0.0:
+        raise ValueError("period_s must be positive")
+    if time_constant_s < 0.0:
+        raise ValueError("time_constant_s must be non-negative")
+    if time_constant_s == 0.0:
+        return 1.0
+    return float(-np.expm1(-period_s / time_constant_s))
 
 
 class BimanualIk:
@@ -114,56 +115,27 @@ class BimanualIk:
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
         damping = float(os.getenv("IK_DAMPING", "0.035"))
-        orientation_weight = float(os.getenv("IK_ORIENTATION_WEIGHT", "0.06"))
-        elbow_weight = float(os.getenv("IK_ELBOW_WEIGHT", "0.8"))
         iterations = int(os.getenv("IK_ITERATIONS", "25"))
 
         for _ in range(iterations):
             for side in SIDES:
                 arm_target = getattr(target, side)
-                elbow_target, _ = self._base_to_world(
-                    np.asarray(arm_target.elbow_position_m), np.eye(3)
+                wrist_target, _ = self._base_to_world(
+                    np.asarray(arm_target.wrist_position_m), np.eye(3)
                 )
-                wrist_target, rotation_target = self._base_to_world(
-                    np.asarray(arm_target.wrist_position_m),
-                    np.asarray(arm_target.wrist_rotation).reshape(3, 3),
-                )
-                elbow_body = self.elbow_bodies[side]
                 wrist_site = self.wrist_sites[side]
                 dofs = self.dof_addresses[side]
 
-                jac_elbow = np.zeros((3, self.model.nv))
                 jac_wrist = np.zeros((3, self.model.nv))
-                jac_rotation = np.zeros((3, self.model.nv))
-                mujoco.mj_jacBody(
-                    self.model, self.data, jac_elbow, None, elbow_body
-                )
                 mujoco.mj_jacSite(
                     self.model,
                     self.data,
                     jac_wrist,
-                    jac_rotation,
+                    None,
                     wrist_site,
                 )
-                error = np.concatenate(
-                    [
-                        elbow_weight
-                        * (elbow_target - self.data.xpos[elbow_body]),
-                        wrist_target - self.data.site_xpos[wrist_site],
-                        orientation_weight
-                        * _orientation_error(
-                            rotation_target,
-                            self.data.site_xmat[wrist_site].reshape(3, 3),
-                        ),
-                    ]
-                )
-                jacobian = np.vstack(
-                    [
-                        elbow_weight * jac_elbow[:, dofs],
-                        jac_wrist[:, dofs],
-                        orientation_weight * jac_rotation[:, dofs],
-                    ]
-                )
+                error = wrist_target - self.data.site_xpos[wrist_site]
+                jacobian = jac_wrist[:, dofs]
                 system = jacobian @ jacobian.T
                 system.flat[:: system.shape[0] + 1] += damping**2
                 delta = jacobian.T @ np.linalg.solve(system, error)
@@ -261,6 +233,12 @@ def simulation_worker(
     achieved_log = log_path / f"achieved-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     render_period = 1.0 / render_fps
     control_period = 1.0 / float(os.getenv("CONTROL_HZ", "60"))
+    smoothing_time_constant = float(
+        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0.12")
+    )
+    smoothing_alpha = exponential_smoothing_alpha(
+        control_period, smoothing_time_constant
+    )
     next_render = time.monotonic()
     next_control = next_render
     wall_start = next_render
@@ -287,7 +265,9 @@ def simulation_worker(
                 if now >= next_control:
                     max_delta = 3.0 * control_period
                     desired += np.clip(
-                        ik_solution - desired, -max_delta, max_delta
+                        smoothing_alpha * (ik_solution - desired),
+                        -max_delta,
+                        max_delta,
                     )
                     next_control += control_period
                     if next_control <= now:

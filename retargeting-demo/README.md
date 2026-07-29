@@ -8,9 +8,10 @@ The runtime uses three independent OS processes:
 
 1. FastAPI receives browser JPEGs and streams both rendered views.
 2. RTMW3D decodes SimCC landmarks, constructs body-size-invariant elbow/wrist
-   targets and absolute hand orientations, and logs `RobotTarget` records.
+   targets, renders both 2D and inset 3D pose views, and logs `RobotTarget` records.
 3. MuJoCo runs damped-least-squares IK, writes joint targets to `data.ctrl`, steps
-   physics at the model's 1 kHz timestep, and renders independently.
+   physics at the model's 1 kHz timestep, and renders independently. Joint commands
+   are exponentially smoothed before they reach `data.ctrl`.
 
 Every cross-process queue has capacity one. Old camera frames, targets, and renders
 are dropped instead of adding latency.
@@ -80,10 +81,10 @@ browser or selecting **Stop** disengages new target application.
   measured 0.220 m upper arm and 0.216 m forearm.
 - Limb directions map directly from camera coordinates into the robot base frame;
   there is no neutral-pose calibration or relative-motion offset.
-- Wrist orientation comes directly from the wrist and four MCP landmarks using a
-  fixed palm-frame-to-OpenArm-tool-frame convention.
-- IK minimizes elbow position, end-effector position, and end-effector orientation
-  with analytic MuJoCo Jacobians and joint-limit clipping.
+- Wrist orientation and elbow position remain available in `RobotTarget` and the
+  logs, but the IK objective uses only end-effector position.
+- IK uses the analytic MuJoCo end-effector position Jacobian and joint-limit
+  clipping. Its joint solution is exponentially smoothed at the control rate.
 
 Intermediate targets are logged to `logs/targets-*.jsonl`; achieved elbow/wrist
 poses and Cartesian errors are logged to `logs/achieved-*.jsonl`. `logs/` is ignored
@@ -97,6 +98,7 @@ uv run python verify_runtime.py
 ```
 
 Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`,
-`IK_ELBOW_WEIGHT`, `IK_ORIENTATION_WEIGHT`, `RETARGET_CONFIDENCE`,
+`ROBOT_COMMAND_SMOOTHING_TAU_S`, `RETARGET_CONFIDENCE`,
 `RETARGET_CONFIDENCE_SECONDS`, `RETARGET_SMOOTHING_ALPHA`,
-`RTMW3D_DET_FREQUENCY`, and `OPENARM_MODEL_PATH`.
+`RTMW3D_DET_FREQUENCY`, and `OPENARM_MODEL_PATH`. Set the command smoothing time
+constant to `0` to disable it; larger values make motion smoother and slower.
