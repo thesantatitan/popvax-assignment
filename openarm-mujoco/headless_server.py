@@ -23,7 +23,7 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / ".assets" / "openarm_mujoco" / "v1" / "scene.xml"
+MODEL_PATH = ROOT / ".assets" / "openarm_mujoco" / "v2" / "cell.xml"
 ARM_ACTUATORS = [
     f"{side}_joint{index}_ctrl"
     for side in ("left", "right")
@@ -95,6 +95,19 @@ class Simulation:
         self.model.vis.global_.offwidth = width
         self.model.vis.global_.offheight = height
         self.data = mujoco.MjData(self.model)
+        home_key = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_KEY, "home"
+        )
+        if home_key < 0:
+            raise RuntimeError("OpenArm v2 model is missing the home keyframe")
+        mujoco.mj_resetDataKeyframe(self.model, self.data, home_key)
+        for actuator_id in range(self.model.nu):
+            joint_id = self.model.actuator_trnid[actuator_id, 0]
+            if joint_id >= 0:
+                self.data.ctrl[actuator_id] = self.data.qpos[
+                    self.model.jnt_qposadr[joint_id]
+                ]
+        mujoco.mj_forward(self.model, self.data)
         self.width = width
         self.height = height
         self.fps = fps
@@ -117,10 +130,12 @@ class Simulation:
         self.qpos_addresses = self.model.jnt_qposadr[self.joint_ids]
         self.dof_addresses = self.model.jnt_dofadr[self.joint_ids]
         self.initial_arm_qpos = self.data.qpos[self.qpos_addresses].copy()
-        self.kp = np.tile(np.array([18.0, 18.0, 12.0, 12.0, 5.0, 5.0, 5.0]), 2)
-        self.kd = np.tile(np.array([2.0, 2.0, 1.5, 1.5, 0.7, 0.7, 0.7]), 2)
-        self.demo_center = np.tile(np.array([0.5, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]), 2)
-        self.demo_amplitude = np.array([0.35, 0.25, 0.30, 0.40, 0.25, 0.20, 0.25])
+        self.demo_center = np.tile(
+            np.array([0.0, 0.0, 0.0, 1.570796, 0.0, 0.0, 0.0]), 2
+        )
+        self.demo_amplitude = np.array(
+            [0.35, 0.12, 0.30, 0.40, 0.25, 0.20, 0.25]
+        )
         self.demo_phase = np.arange(7) * 0.55
 
     def run(self) -> None:
@@ -148,21 +163,9 @@ class Simulation:
                         desired = np.clip(
                             desired, limits[:, 0] + 0.02, limits[:, 1] - 0.02
                         )
-                        qpos = self.data.qpos[self.qpos_addresses]
-                        qvel = self.data.qvel[self.dof_addresses]
-                        gravity_and_bias = self.data.qfrc_bias[self.dof_addresses]
-                        torque = (
-                            self.kp * (desired - qpos)
-                            - self.kd * qvel
-                            + gravity_and_bias
-                        )
-                        force_limits = self.model.actuator_forcerange[
-                            self.actuator_ids
-                        ]
-                        torque = np.clip(
-                            torque, force_limits[:, 0], force_limits[:, 1]
-                        )
-                        self.data.ctrl[self.actuator_ids] = torque
+                        # v2 actuators are position servos. MuJoCo's actuator
+                        # definitions apply their embedded kp/kv controller.
+                        self.data.ctrl[self.actuator_ids] = desired
                     mujoco.mj_step(self.model, self.data)
 
                 if now >= next_render:

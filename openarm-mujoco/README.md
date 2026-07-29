@@ -1,6 +1,6 @@
 # OpenArm MuJoCo setup
 
-This subfolder provides the assessment's simulation baseline: OpenArm v1 bimanual
+This subfolder provides the assessment's simulation baseline: OpenArm v2 bimanual
 (7 arm joints per side), pinned MuJoCo/Python dependencies, official collision
 geometry and joint limits, and a verification that the arms move through actuators
 while MuJoCo steps physics.
@@ -40,7 +40,7 @@ XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir \
 uv run python launch.py
 ```
 
-The MuJoCo viewer should show the complete bimanual OpenArm. To inspect collision
+The MuJoCo viewer should show the complete v2 bimanual OpenArm cell. To inspect collision
 geometry, enable the collision/convex-hull rendering groups in the viewer.
 
 ## Headless browser stream
@@ -83,10 +83,13 @@ uv run python verify_setup.py
 
 The check requires:
 
-- exactly 14 named arm joints and 14 matching arm actuators;
+- exactly 14 named arm joints and 14 matching position actuators;
 - limits on all 14 arm joints;
+- internal `kp`/`kv` PD gains and position-control ranges on every arm actuator;
 - active collision geoms;
-- measurable joint motion after applying actuator controls and stepping physics.
+- measurable joint motion after applying position targets and stepping physics.
 
-The retargeting controller should write desired torques to the 14 actuator controls
-and call `mujoco.mj_step`; it must not write desired poses directly into `data.qpos`.
+The retargeting controller should write desired joint positions to the 14 v2 actuator
+controls and call `mujoco.mj_step`; the model's internal PD controller converts those
+targets into bounded actuator forces. It must not write desired poses directly into
+`data.qpos`.

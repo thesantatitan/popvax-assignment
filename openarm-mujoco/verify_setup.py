@@ -7,7 +7,7 @@ import numpy as np
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / ".assets" / "openarm_mujoco" / "v1" / "openarm_bimanual.xml"
+MODEL_PATH = ROOT / ".assets" / "openarm_mujoco" / "v2" / "cell.xml"
 ARM_JOINTS = [
     f"openarm_{side}_joint{index}"
     for side in ("left", "right")
@@ -34,6 +34,15 @@ def main() -> None:
 
     model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
     data = mujoco.MjData(model)
+    home_key = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, "home")
+    if home_key < 0:
+        raise RuntimeError("OpenArm v2 model is missing the home keyframe")
+    mujoco.mj_resetDataKeyframe(model, data, home_key)
+    for actuator_id in range(model.nu):
+        joint_id = model.actuator_trnid[actuator_id, 0]
+        if joint_id >= 0:
+            data.ctrl[actuator_id] = data.qpos[model.jnt_qposadr[joint_id]]
+    mujoco.mj_forward(model, data)
     joint_ids = named_ids(model, mujoco.mjtObj.mjOBJ_JOINT, ARM_JOINTS)
     actuator_ids = named_ids(model, mujoco.mjtObj.mjOBJ_ACTUATOR, ARM_ACTUATORS)
 
@@ -42,10 +51,19 @@ def main() -> None:
         raise RuntimeError("Model contains no active collision geometry")
     if not np.all(model.jnt_limited[joint_ids]):
         raise RuntimeError("One or more arm joints do not have limits")
+    if not np.all(model.actuator_ctrllimited[actuator_ids]):
+        raise RuntimeError("One or more v2 arm position actuators lack control limits")
+    kp = model.actuator_gainprm[actuator_ids, 0]
+    kv = -model.actuator_biasprm[actuator_ids, 2]
+    if not np.all(kp > 0) or not np.all(kv > 0):
+        raise RuntimeError("One or more v2 arm actuators lack internal PD gains")
 
     initial_qpos = data.qpos.copy()
-    data.ctrl[actuator_ids] = 0.2
-    for _ in range(100):
+    targets = data.qpos[model.jnt_qposadr[joint_ids]].copy()
+    targets[0] += 0.2
+    targets[7] += 0.2
+    data.ctrl[actuator_ids] = targets
+    for _ in range(500):
         mujoco.mj_step(model, data)
     arm_qpos_addresses = model.jnt_qposadr[joint_ids]
     displacement = float(np.linalg.norm(data.qpos[arm_qpos_addresses] - initial_qpos[arm_qpos_addresses]))
@@ -57,10 +75,11 @@ def main() -> None:
     print(f"Arm joints: {len(joint_ids)} (7 left + 7 right)")
     print(f"Arm actuators: {len(actuator_ids)}")
     print(f"Active collision geoms: {collision_geoms}")
-    print(f"100-step actuator displacement: {displacement:.6f} rad")
-    print("OpenArm MuJoCo setup verified.")
+    print(f"Internal position-servo kp range: {kp.min():.1f}..{kp.max():.1f}")
+    print(f"Internal position-servo kv range: {kv.min():.1f}..{kv.max():.1f}")
+    print(f"500-step position-target displacement: {displacement:.6f} rad")
+    print("OpenArm v2 MuJoCo setup verified.")
 
 
 if __name__ == "__main__":
     main()
-
