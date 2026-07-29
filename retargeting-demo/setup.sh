@@ -14,6 +14,7 @@ uv sync --extra gpu --extra tensorrt --extra dev
 # expose the same Python module, so reinstall the pinned GPU wheel last.
 if [[ "$(uname -s)" == "Linux" ]]; then
   uv pip install --reinstall "onnxruntime-gpu==1.26.0"
+  ./prepare_tensorrt_engine.sh
 fi
 
 uv run python verify_runtime.py

@@ -27,6 +27,7 @@ sys.path.insert(0, str(RTMW3D_DEMO))
 from demo import draw_3d_inset
 from roi_tracker import PersistentRoiPoseTracker
 from tensorrt_backend import RTMPose3d as TensorRTPose3d
+from runtime_paths import tensorrt_engine_path
 
 YOLOX_NANO_URL = (
     "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/"
@@ -93,12 +94,7 @@ def _make_tracker() -> tuple[PersistentRoiPoseTracker, str, str]:
         pose_input_size=(288, 384),
     )
     if backend == "tensorrt":
-        engine = Path(
-            os.getenv(
-                "RTMW3D_TRT_ENGINE",
-                "/home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan",
-            )
-        ).expanduser()
+        engine = tensorrt_engine_path()
         solution = partial(
             SplitProviderTensorRTWholebody3d,
             det=detector_model,

@@ -32,6 +32,10 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export RTMW3D_DEVICE="${RTMW3D_DEVICE:-cuda}"
 export RTMW3D_BACKEND="${RTMW3D_BACKEND:-tensorrt}"
 
+if [[ "$RTMW3D_BACKEND" == "tensorrt" ]]; then
+  ./prepare_tensorrt_engine.sh
+fi
+
 exec uv run python -m retargeting_demo.main \
   --host "${RETARGETING_HOST:-0.0.0.0}" \
   --port "${RETARGETING_PORT:-8000}" \

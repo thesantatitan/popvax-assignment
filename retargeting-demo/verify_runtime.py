@@ -8,6 +8,7 @@ from pathlib import Path
 
 import mujoco
 import onnxruntime as ort
+from runtime_paths import tensorrt_engine_path
 
 ROOT = Path(__file__).resolve().parent
 MODEL = Path(
@@ -21,12 +22,7 @@ MODEL = Path(
         ),
     )
 )
-ENGINE = Path(
-    os.getenv(
-        "RTMW3D_TRT_ENGINE",
-        "/home/dev/.cache/rtmlib/hub/checkpoints/rtmw3d-l-fp32.plan",
-    )
-).expanduser()
+ENGINE = tensorrt_engine_path()
 
 
 def main() -> int:
