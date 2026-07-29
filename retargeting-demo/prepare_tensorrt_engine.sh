@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 exec uv run \
   --with "torch==2.5.1" \
+  --with "setuptools==80.9.0" \
   --with "mmpose==1.3.2" \
   --with "mmdet==3.3.0" \
   --with "mmengine==0.10.7" \
