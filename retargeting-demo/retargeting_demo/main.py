@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing as mp
-import signal
 from pathlib import Path
 
 import uvicorn
@@ -84,10 +83,6 @@ def main() -> None:
     )
     app = create_app(runtime)
 
-    def stop_workers(*_: object) -> None:
-        stop_event.set()
-
-    signal.signal(signal.SIGTERM, stop_workers)
     try:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     finally:

@@ -44,8 +44,11 @@ Override it with `RTMW3D_TRT_ENGINE` if needed.
 
 ```bash
 cd /home/dev/popvax-assignment/retargeting-demo
-MUJOCO_GL=egl uv run python -m retargeting_demo.main --port 8000
+./run_wsl_server.sh
 ```
+
+Override the listener with `RETARGETING_HOST` or `RETARGETING_PORT`. Additional
+arguments such as `--sim-width 1280 --sim-height 720` are forwarded to the module.
 
 Open `http://localhost:8000` on the PC. For a Mac webcam, tunnel the same server:
 
