@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 os.environ.setdefault("MUJOCO_GL", "egl" if sys.platform.startswith("linux") else "glfw")
@@ -23,6 +24,7 @@ from .contracts import (
     ELBOW_MODES,
     ORIENTATION_MODES,
     WRIST_MODES,
+    JointRetargetingTarget,
     RenderedFrame,
     RobotTarget,
 )
@@ -470,6 +472,59 @@ def _lifter_top_command(model: mujoco.MjModel) -> tuple[int, float]:
     return actuator_id, float(model.actuator_ctrlrange[actuator_id, 1])
 
 
+def joint_retargeting_target_record(
+    target: JointRetargetingTarget,
+    *,
+    time_ns: int,
+    simulation_time_s: float,
+    control_timestep: int,
+    tracking_active: bool,
+) -> dict[str, object]:
+    """Build the explicit robot-space target between IK and control."""
+
+    return {
+        "schema_version": 1,
+        "time_ns": time_ns,
+        "simulation_time_s": simulation_time_s,
+        "control_timestep": control_timestep,
+        "source_target_sequence": target.source_target_sequence,
+        "mode": target.mode,
+        "tracking_active": tracking_active,
+        "robot": "OpenArm v2 bimanual",
+        "state": "desired_joint_positions",
+        "units": "radians",
+        "order": {
+            side: [f"{side}_joint{index}" for index in range(1, 8)]
+            for side in SIDES
+        },
+        "desired_joint_positions_rad": {
+            "left": list(target.left_joint_positions_rad),
+            "right": list(target.right_joint_positions_rad),
+        },
+    }
+
+
+def joint_retargeting_target(
+    solution_rad: np.ndarray,
+    *,
+    source_target_sequence: int,
+    mode: str | None,
+) -> JointRetargetingTarget:
+    """Convert Mink's ordered arm solution into the control contract."""
+
+    solution = np.asarray(solution_rad, dtype=float)
+    if solution.shape != (14,):
+        raise ValueError(
+            "Expected 14 desired joint positions for the two 7-DoF arms"
+        )
+    return JointRetargetingTarget(
+        source_target_sequence=source_target_sequence,
+        mode=mode,
+        left_joint_positions_rad=tuple(solution[:7]),
+        right_joint_positions_rad=tuple(solution[7:]),
+    )
+
+
 def simulation_worker(
     target_queue,
     sim_frame_queue,
@@ -478,6 +533,7 @@ def simulation_worker(
     engaged_event,
     stop_event,
     log_directory: str,
+    retargeting_target_log: str,
     width: int,
     height: int,
     render_fps: float,
@@ -500,7 +556,11 @@ def simulation_worker(
     ik = BimanualIk(model, data)
     arm_actuators = ik.all_actuator_ids
     joint_command = data.ctrl[arm_actuators].copy()
-    ik_solution = joint_command.copy()
+    desired_joint_target = joint_retargeting_target(
+        joint_command,
+        source_target_sequence=0,
+        mode=None,
+    )
     active_target: RobotTarget | None = None
     target_dirty = False
     last_target_wall = 0.0
@@ -509,6 +569,8 @@ def simulation_worker(
     log_path = Path(log_directory)
     log_path.mkdir(parents=True, exist_ok=True)
     achieved_log = log_path / f"achieved-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
+    assignment_log = Path(retargeting_target_log)
+    assignment_log.parent.mkdir(parents=True, exist_ok=True)
     render_period = 1.0 / render_fps
     control_period = 1.0 / float(os.getenv("CONTROL_HZ", "60"))
     joint_smoothing_tau_s = float(
@@ -526,11 +588,18 @@ def simulation_worker(
     camera = mujoco.MjvCamera()
     mujoco.mjv_defaultFreeCamera(model, camera)
     frame_number = 0
+    control_timestep = 0
 
-    with achieved_log.open(  # noqa: SIM117
-        "a", encoding="utf-8", buffering=1
-    ) as output:
-        with mujoco.Renderer(model, height=height, width=width) as renderer:
+    with ExitStack() as stack:
+        output = stack.enter_context(
+            achieved_log.open("a", encoding="utf-8", buffering=1)
+        )
+        target_output = stack.enter_context(
+            assignment_log.open("w", encoding="utf-8", buffering=1)
+        )
+        with mujoco.Renderer(
+            model, height=height, width=width
+        ) as renderer:
             while not stop_event.is_set() and os.getppid() == parent_pid:
                 now = time.monotonic()
                 incoming = drain_latest(target_queue)
@@ -544,15 +613,40 @@ def simulation_worker(
                     target_dirty = False
 
                 if target_dirty and active_target is not None:
-                    ik_solution = ik.solve(active_target, data.qpos)
+                    desired_joint_target = joint_retargeting_target(
+                        ik.solve(active_target, data.qpos),
+                        source_target_sequence=active_target.sequence,
+                        mode=active_target.mode,
+                    )
                     target_dirty = False
 
                 if now >= next_control:
+                    desired_joint_positions = np.asarray(
+                        desired_joint_target.positions_rad
+                    )
                     joint_command += np.clip(
-                        joint_smoothing_alpha * (ik_solution - joint_command),
+                        joint_smoothing_alpha
+                        * (desired_joint_positions - joint_command),
                         -joint_max_speed_rad_s * control_period,
                         joint_max_speed_rad_s * control_period,
                     )
+                    target_output.write(
+                        json.dumps(
+                            joint_retargeting_target_record(
+                                desired_joint_target,
+                                time_ns=time.monotonic_ns(),
+                                simulation_time_s=float(data.time),
+                                control_timestep=control_timestep,
+                                tracking_active=(
+                                    engaged_event.is_set()
+                                    and active_target is not None
+                                ),
+                            ),
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    )
+                    control_timestep += 1
                     next_control += control_period
                     if next_control <= now:
                         next_control = now + control_period
@@ -639,7 +733,7 @@ def simulation_worker(
                                 for side in SIDES
                             },
                             "ik_solution_rad": {
-                                side: ik_solution[
+                                side: desired_joint_positions[
                                     index * 7 : (index + 1) * 7
                                 ].tolist()
                                 for index, side in enumerate(SIDES)

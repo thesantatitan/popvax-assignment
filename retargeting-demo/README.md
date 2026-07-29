@@ -137,10 +137,18 @@ new profiles after calibrating a camera.
   a previous-posture objective. Its solution is exponentially filtered again
   before reaching the position actuators.
 
-Intermediate targets, the selected person's decoded `keypoints_simcc`, and that
-person's detection index are logged to `logs/targets-*.jsonl`; achieved elbow/wrist
-poses and Cartesian errors are logged to `logs/achieved-*.jsonl`. `logs/` is
-ignored by Git.
+The assignment's explicit intermediate desired robot state is the raw Mink IK
+solution: seven desired joint positions for each arm in radians, before
+joint-command filtering and `data.ctrl`. It is logged at every control timestep to
+the single stable, Git-tracked
+`assignment_logs/retargeting_target.jsonl`. Starting the demo truncates and
+overwrites that file instead of creating a per-run file. Repeated records during
+low-confidence periods document the held desired pose.
+
+Perception targets, the selected person's decoded `keypoints_simcc`, and that
+person's detection index remain in diagnostic `logs/targets-*.jsonl`; achieved
+elbow/wrist poses and Cartesian errors remain in `logs/achieved-*.jsonl`. The
+diagnostic `logs/` directory is ignored by Git.
 
 ## Validation
 

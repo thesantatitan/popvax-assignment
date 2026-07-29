@@ -4,15 +4,58 @@ import mujoco
 import numpy as np
 import pytest
 
-from retargeting_demo.contracts import ArmTarget, RobotTarget
+from retargeting_demo.contracts import (
+    ArmTarget,
+    RobotTarget,
+)
 from retargeting_demo.simulation import (
     ArmConfigurationLimit,
     BimanualIk,
     _initialize_model,
     _lifter_top_command,
+    joint_retargeting_target,
+    joint_retargeting_target_record,
 )
 
 MODEL_PATH = Path(__file__).resolve().parents[1] / "vendor/openarm-v2/cell.xml"
+
+
+def test_joint_retargeting_target_exposes_both_arms_in_radians() -> None:
+    desired = np.arange(14, dtype=float) / 10.0
+
+    target = joint_retargeting_target(
+        desired,
+        source_target_sequence=7,
+        mode="both",
+    )
+    record = joint_retargeting_target_record(
+        target,
+        time_ns=123,
+        simulation_time_s=0.5,
+        control_timestep=30,
+        tracking_active=True,
+    )
+
+    assert record["state"] == "desired_joint_positions"
+    assert record["units"] == "radians"
+    assert record["control_timestep"] == 30
+    assert record["desired_joint_positions_rad"] == {
+        "left": desired[:7].tolist(),
+        "right": desired[7:].tolist(),
+    }
+    assert record["order"] == {
+        "left": [f"left_joint{index}" for index in range(1, 8)],
+        "right": [f"right_joint{index}" for index in range(1, 8)],
+    }
+
+
+def test_joint_retargeting_target_rejects_wrong_joint_count() -> None:
+    with pytest.raises(ValueError, match="14 desired joint positions"):
+        joint_retargeting_target(
+            np.zeros(13),
+            source_target_sequence=7,
+            mode="both",
+        )
 
 
 def test_ik_records_solution_delta_and_cartesian_residuals() -> None:

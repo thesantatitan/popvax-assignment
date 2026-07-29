@@ -23,6 +23,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sim-height", type=int, default=720)
     parser.add_argument("--sim-fps", type=float, default=30.0)
     parser.add_argument("--log-directory", type=Path, default=ROOT / "logs")
+    parser.add_argument(
+        "--retargeting-target-log",
+        type=Path,
+        default=ROOT / "assignment_logs" / "retargeting_target.jsonl",
+        help=(
+            "Stable assignment log overwritten on startup with desired "
+            "OpenArm joint positions at every control timestep"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -69,6 +78,7 @@ def main() -> None:
             engaged_event,
             stop_event,
             str(args.log_directory),
+            str(args.retargeting_target_log),
             args.sim_width,
             args.sim_height,
             args.sim_fps,

@@ -50,6 +50,32 @@ class RobotTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class JointRetargetingTarget:
+    """Desired bimanual OpenArm state passed from IK to joint control."""
+
+    source_target_sequence: int
+    mode: RetargetMode | None
+    left_joint_positions_rad: tuple[float, ...]
+    right_joint_positions_rad: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            len(self.left_joint_positions_rad) != 7
+            or len(self.right_joint_positions_rad) != 7
+        ):
+            raise ValueError(
+                "JointRetargetingTarget requires seven joints per arm"
+            )
+
+    @property
+    def positions_rad(self) -> tuple[float, ...]:
+        return (
+            self.left_joint_positions_rad
+            + self.right_joint_positions_rad
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RenderedFrame:
     sequence: int
     jpeg: bytes

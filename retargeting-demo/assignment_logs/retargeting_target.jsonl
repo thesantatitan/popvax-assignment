@@ -1,0 +1,1 @@
+{"schema_version":1,"type":"schema","state":"desired_joint_positions","robot":"OpenArm v2 bimanual","units":"radians","note":"This tracked file is overwritten when the demo starts, then contains one desired 14-joint robot target per control timestep."}
