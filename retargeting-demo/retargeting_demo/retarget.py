@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict
 
 import cv2
@@ -27,6 +28,18 @@ CAMERA_TO_ROBOT = np.array(
     [[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]],
     dtype=np.float64,
 )
+
+
+def exponential_smoothing_alpha(period_s: float, time_constant_s: float) -> float:
+    """Return a rate-independent exponential smoothing coefficient."""
+
+    if period_s <= 0.0:
+        raise ValueError("period_s must be positive")
+    if time_constant_s < 0.0:
+        raise ValueError("time_constant_s must be non-negative")
+    if time_constant_s == 0.0:
+        return 1.0
+    return float(-math.expm1(-period_s / time_constant_s))
 
 
 def required_keypoint_indices(mode: RetargetMode) -> list[int]:
@@ -151,14 +164,22 @@ class SimccRetargeter:
     def __init__(
         self,
         confidence_threshold: float = 0.35,
-        smoothing_alpha: float = 0.55,
+        smoothing_time_constant_s: float = 0.12,
     ) -> None:
         self.confidence_threshold = confidence_threshold
-        if not 0.0 < smoothing_alpha <= 1.0:
-            raise ValueError("smoothing_alpha must be in (0, 1]")
-        self.smoothing_alpha = smoothing_alpha
+        if smoothing_time_constant_s < 0.0:
+            raise ValueError("smoothing_time_constant_s must be non-negative")
+        self.smoothing_time_constant_s = smoothing_time_constant_s
         self.last_upper_directions: dict[str, np.ndarray] = {}
         self.last_forearm_directions: dict[str, np.ndarray] = {}
+        self.last_inference_time_ns: int | None = None
+
+    def reset_smoothing(self) -> None:
+        """Forget pose-filter history after a geometry or tracking reset."""
+
+        self.last_upper_directions.clear()
+        self.last_forearm_directions.clear()
+        self.last_inference_time_ns = None
 
     def select_person(self, scores: np.ndarray) -> int:
         body_scores = np.asarray(scores)[:, :17]
@@ -212,16 +233,25 @@ class SimccRetargeter:
             if np.min(person_scores[required]) < self.confidence_threshold:
                 raise ValueError(f"{side} arm confidence is too low")
 
+        smoothing_alpha = 1.0
+        if self.last_inference_time_ns is not None:
+            period_s = (inference_time_ns - self.last_inference_time_ns) / 1e9
+            if period_s > 0.0:
+                smoothing_alpha = exponential_smoothing_alpha(
+                    period_s, self.smoothing_time_constant_s
+                )
+        self.last_inference_time_ns = inference_time_ns
+
         arms: dict[str, ArmTarget] = {}
         for side, indices in BODY.items():
             shoulder = robot_points[indices["shoulder"]]
             elbow = robot_points[indices["elbow"]]
             upper_direction = _unit(elbow - shoulder)
             if side in self.last_upper_directions:
-                alpha = self.smoothing_alpha
                 upper_direction = _unit(
-                    alpha * upper_direction
-                    + (1.0 - alpha) * self.last_upper_directions[side]
+                    smoothing_alpha * upper_direction
+                    + (1.0 - smoothing_alpha)
+                    * self.last_upper_directions[side]
                 )
             self.last_upper_directions[side] = upper_direction.copy()
             elbow_target = (
@@ -233,10 +263,10 @@ class SimccRetargeter:
                 wrist = robot_points[indices["wrist"]]
                 forearm_direction = _unit(wrist - elbow)
                 if side in self.last_forearm_directions:
-                    alpha = self.smoothing_alpha
                     forearm_direction = _unit(
-                        alpha * forearm_direction
-                        + (1.0 - alpha) * self.last_forearm_directions[side]
+                        smoothing_alpha * forearm_direction
+                        + (1.0 - smoothing_alpha)
+                        * self.last_forearm_directions[side]
                     )
                 self.last_forearm_directions[side] = forearm_direction.copy()
                 wrist_target = (

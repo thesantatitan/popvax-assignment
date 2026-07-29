@@ -8,11 +8,12 @@ The runtime uses three independent OS processes:
 
 1. FastAPI receives browser JPEGs and streams both rendered views.
 2. RTMW3D decodes SimCC landmarks, constructs body-size-invariant elbow/wrist
-   targets, renders both 2D and inset 3D pose views, and logs `RobotTarget` records.
+   targets, exponentially filters the normalized Cartesian limb directions,
+   renders both 2D and inset 3D pose views, and logs `RobotTarget` records.
 3. MuJoCo runs damped-least-squares IK, writes joint targets to `data.ctrl`, steps
-   physics at the model's 1 kHz timestep, and renders independently. Joint commands
-   are exponentially smoothed before they reach `data.ctrl`. The model's actuated
-   vertical lifter is continuously commanded to the top of its range (`0.3 m`).
+   physics at the model's 1 kHz timestep, and renders independently. The model's
+   actuated vertical lifter is continuously commanded to the top of its range
+   (`0.3 m`).
 
 Every cross-process queue has capacity one. Old camera frames, targets, and renders
 are dropped instead of adding latency.
@@ -122,8 +123,9 @@ new profiles after calibrating a camera.
 - **End effector only** uses only the end-effector-position residual and site
   Jacobian.
 - **Elbow + end effector** stacks both position residuals and Jacobians.
-- IK applies joint-limit clipping, and its joint solution is exponentially
-  smoothed at the control rate.
+- The normalized Cartesian limb directions are exponentially filtered before IK;
+  IK applies joint-limit clipping and its solution is sent directly to the
+  position actuators.
 
 Intermediate targets, the selected person's decoded `keypoints_simcc`, and that
 person's detection index are logged to `logs/targets-*.jsonl`; achieved elbow/wrist
@@ -138,7 +140,7 @@ uv run python verify_runtime.py
 ```
 
 Useful environment overrides include `CONTROL_HZ`, `IK_ITERATIONS`, `IK_DAMPING`,
-`ROBOT_COMMAND_SMOOTHING_TAU_S`, `RETARGET_CONFIDENCE`,
-`RETARGET_CONFIDENCE_SECONDS`, `RETARGET_SMOOTHING_ALPHA`,
-`RTMW3D_DET_FREQUENCY`, and `OPENARM_MODEL_PATH`. Set the command smoothing time
-constant to `0` to disable it; larger values make motion smoother and slower.
+`RETARGET_SMOOTHING_TAU_S`, `RETARGET_CONFIDENCE`,
+`RETARGET_CONFIDENCE_SECONDS`, `RTMW3D_DET_FREQUENCY`, and
+`OPENARM_MODEL_PATH`. Set the Cartesian pose smoothing time constant to `0` to
+disable it; larger values make the target trajectory smoother and slower.

@@ -86,9 +86,35 @@
       .calibration summary { color: var(--text); cursor: pointer; font-weight: 800; }
       .calibration-tools { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 11px; }
       .calibration a { color: var(--blue); }
-      canvas { display: none; }
+      #capture { display: none; }
+      .charts {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px; margin-top: 16px;
+      }
+      .chart {
+        min-width: 0; background: var(--panel); border: 1px solid var(--line);
+        border-radius: 15px; padding: 10px 13px 13px;
+      }
+      .chart-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; color: var(--muted); margin-bottom: 7px;
+      }
+      .chart-head strong { color: var(--text); font-size: 13px; }
+      .legend { display: flex; gap: 10px; font-size: 12px; }
+      .legend span::before {
+        content: ""; display: inline-block; width: 14px; height: 2px;
+        margin-right: 5px; vertical-align: middle; background: currentColor;
+      }
+      .axis-x { color: var(--mint); }
+      .axis-y { color: var(--blue); }
+      .axis-z { color: var(--amber); }
+      .trajectory-chart {
+        display: block; width: 100%; height: 210px; border-radius: 8px;
+        background: #080c12;
+      }
       @media (max-width: 940px) {
         .views { grid-template-columns: 1fr; }
+        .charts { grid-template-columns: 1fr; }
         .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       }
       @media (max-width: 560px) {
@@ -171,6 +197,27 @@
         </article>
       </section>
 
+      <section class="charts">
+        <article class="chart">
+          <div class="chart-head">
+            <strong>Left end effector · filtered normalized target</strong>
+            <div class="legend">
+              <span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z</span>
+            </div>
+          </div>
+          <canvas id="leftTrajectory" class="trajectory-chart"></canvas>
+        </article>
+        <article class="chart">
+          <div class="chart-head">
+            <strong>Right end effector · filtered normalized target</strong>
+            <div class="legend">
+              <span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z</span>
+            </div>
+          </div>
+          <canvas id="rightTrajectory" class="trajectory-chart"></canvas>
+        </article>
+      </section>
+
       <section class="stats">
         <div class="stat"><span>Perception</span><strong id="poseFps">—</strong></div>
         <div class="stat"><span>Inference</span><strong id="inference">—</strong></div>
@@ -224,6 +271,66 @@
       let cameraScheduled = false;
       let cameraId = "";
       let calibrationActive = false;
+      const trajectoryHistory = { left: [], right: [] };
+      const trajectoryColors = ["#68e0bb", "#75baff", "#ffc96b"];
+      const trajectoryLimit = 300;
+
+      function resetTrajectoryGraphs() {
+        trajectoryHistory.left.length = 0;
+        trajectoryHistory.right.length = 0;
+        drawTrajectory("left");
+        drawTrajectory("right");
+      }
+      function drawTrajectory(side) {
+        const chart = document.getElementById(`${side}Trajectory`);
+        const cssWidth = Math.max(300, chart.clientWidth);
+        const cssHeight = Math.max(160, chart.clientHeight);
+        const scale = window.devicePixelRatio || 1;
+        if (chart.width !== Math.round(cssWidth * scale) || chart.height !== Math.round(cssHeight * scale)) {
+          chart.width = Math.round(cssWidth * scale);
+          chart.height = Math.round(cssHeight * scale);
+        }
+        const ctx = chart.getContext("2d");
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+        const pad = { left: 42, right: 10, top: 10, bottom: 24 };
+        const width = cssWidth - pad.left - pad.right;
+        const height = cssHeight - pad.top - pad.bottom;
+        const minimum = -0.5;
+        const maximum = 0.5;
+        const y = value => pad.top + (maximum - value) / (maximum - minimum) * height;
+        ctx.strokeStyle = "#263345";
+        ctx.fillStyle = "#92a1b5";
+        ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+        ctx.lineWidth = 1;
+        for (const tick of [-0.5, -0.25, 0, 0.25, 0.5]) {
+          const py = y(tick);
+          ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(cssWidth - pad.right, py); ctx.stroke();
+          ctx.fillText(`${tick.toFixed(2)} m`, 2, py + 4);
+        }
+        const points = trajectoryHistory[side];
+        if (points.length < 2) return;
+        for (let axis = 0; axis < 3; axis += 1) {
+          ctx.strokeStyle = trajectoryColors[axis];
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          points.forEach((point, index) => {
+            const px = pad.left + index / Math.max(trajectoryLimit - 1, 1) * width;
+            const py = y(Math.max(minimum, Math.min(maximum, point[axis])));
+            if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          ctx.stroke();
+        }
+      }
+      function appendTrajectory(data) {
+        for (const side of ["left", "right"]) {
+          const point = data?.[side];
+          if (!Array.isArray(point) || point.length !== 3) continue;
+          trajectoryHistory[side].push(point.map(Number));
+          if (trajectoryHistory[side].length > trajectoryLimit) trajectoryHistory[side].shift();
+          drawTrajectory(side);
+        }
+      }
 
       function setMessage(text) { message.textContent = text; }
       function value(id, text) { document.getElementById(id).textContent = text; }
@@ -245,6 +352,7 @@
           value("poseFps", data.fps == null ? "—" : `${data.fps} FPS`);
           value("inference", data.processing_ms == null ? "—" : `${data.processing_ms} ms`);
           value("model", `${data.backend} · ${data.device}`);
+          appendTrajectory(data.smoothed_end_effectors);
           intrinsicsStatus.textContent = data.camera_intrinsics_enabled
             ? `Camera intrinsics · ${data.camera_intrinsics_source}`
             : "Camera intrinsics disabled";
@@ -338,6 +446,7 @@
         tracking.textContent = "Waiting for confident pose";
         tracking.className = "pill warn";
         setMessage("Start the camera on this device.");
+        resetTrajectoryGraphs();
       }
       function connectSocket() {
         if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
@@ -391,10 +500,12 @@
       stopButton.addEventListener("click", stop);
       document.getElementById("resetView").addEventListener("click", () => sendCommand({ action: "reset" }));
       retargetMode.addEventListener("change", () => {
+        resetTrajectoryGraphs();
         sendCommand({ action: "set_mode", mode: retargetMode.value });
         setMessage("Mode changed. Acquiring a confident pose for two continuous seconds…");
       });
       useIntrinsics.addEventListener("change", () => {
+        resetTrajectoryGraphs();
         sendCameraIntrinsicsSetting();
         setMessage("Camera geometry changed. Reacquiring confidence for two seconds…");
       });
@@ -483,6 +594,11 @@
         stop();
         if (socket) socket.close();
       });
+      window.addEventListener("resize", () => {
+        drawTrajectory("left");
+        drawTrajectory("right");
+      });
+      resetTrajectoryGraphs();
       connectSocket();
     </script>
   </body>

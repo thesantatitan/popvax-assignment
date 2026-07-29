@@ -37,18 +37,6 @@ def _object_id(model: mujoco.MjModel, kind: mujoco.mjtObj, name: str) -> int:
     return result
 
 
-def exponential_smoothing_alpha(period_s: float, time_constant_s: float) -> float:
-    """Return a rate-independent exponential smoothing coefficient."""
-
-    if period_s <= 0.0:
-        raise ValueError("period_s must be positive")
-    if time_constant_s < 0.0:
-        raise ValueError("time_constant_s must be non-negative")
-    if time_constant_s == 0.0:
-        return 1.0
-    return float(-np.expm1(-period_s / time_constant_s))
-
-
 class BimanualIk:
     """Small damped-least-squares solver using MuJoCo analytic Jacobians."""
 
@@ -305,8 +293,7 @@ def simulation_worker(
     data.ctrl[lifter_actuator] = lifter_top
     ik = BimanualIk(model, data)
     arm_actuators = ik.all_actuator_ids
-    desired = data.ctrl[arm_actuators].copy()
-    ik_solution = desired.copy()
+    ik_solution = data.ctrl[arm_actuators].copy()
     active_target: RobotTarget | None = None
     target_dirty = False
     last_target_wall = 0.0
@@ -317,12 +304,6 @@ def simulation_worker(
     achieved_log = log_path / f"achieved-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     render_period = 1.0 / render_fps
     control_period = 1.0 / float(os.getenv("CONTROL_HZ", "60"))
-    smoothing_time_constant = float(
-        os.getenv("ROBOT_COMMAND_SMOOTHING_TAU_S", "0.12")
-    )
-    smoothing_alpha = exponential_smoothing_alpha(
-        control_period, smoothing_time_constant
-    )
     next_render = time.monotonic()
     next_control = next_render
     wall_start = next_render
@@ -347,12 +328,6 @@ def simulation_worker(
                     target_dirty = False
 
                 if now >= next_control:
-                    max_delta = 3.0 * control_period
-                    desired += np.clip(
-                        smoothing_alpha * (ik_solution - desired),
-                        -max_delta,
-                        max_delta,
-                    )
                     next_control += control_period
                     if next_control <= now:
                         next_control = now + control_period
@@ -364,8 +339,8 @@ def simulation_worker(
                 target_simulation_time = now - wall_start
                 while data.time < target_simulation_time:
                     # OpenArm v2 uses position servos. This is the only command
-                    # path: desired joints -> data.ctrl -> physics step.
-                    data.ctrl[arm_actuators] = desired
+                    # path: filtered Cartesian target -> IK -> data.ctrl.
+                    data.ctrl[arm_actuators] = ik_solution
                     data.ctrl[lifter_actuator] = lifter_top
                     mujoco.mj_step(model, data)
 
@@ -445,8 +420,8 @@ def simulation_worker(
                                 ].tolist()
                                 for index, side in enumerate(SIDES)
                             },
-                            "smoothed_command_rad": {
-                                side: desired[
+                            "command_rad": {
+                                side: ik_solution[
                                     index * 7 : (index + 1) * 7
                                 ].tolist()
                                 for index, side in enumerate(SIDES)

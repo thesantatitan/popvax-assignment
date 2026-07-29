@@ -174,7 +174,9 @@ def perception_worker(
     tracker, device, backend = _make_tracker()
     retargeter = SimccRetargeter(
         confidence_threshold=float(os.getenv("RETARGET_CONFIDENCE", "0.35")),
-        smoothing_alpha=float(os.getenv("RETARGET_SMOOTHING_ALPHA", "0.55")),
+        smoothing_time_constant_s=float(
+            os.getenv("RETARGET_SMOOTHING_TAU_S", "0.12")
+        ),
     )
     gate = ContinuousConfidenceGate(
         required_seconds=float(os.getenv("RETARGET_CONFIDENCE_SECONDS", "2.0"))
@@ -194,15 +196,18 @@ def perception_worker(
             requested_mode = drain_latest(mode_queue)
             if requested_mode in RETARGET_MODES and requested_mode != mode:
                 mode = requested_mode
+                retargeter.reset_smoothing()
                 engaged_event.clear()
                 gate_state = gate.reset()
             requested_camera_config = drain_latest(camera_config_queue)
             if isinstance(requested_camera_config, dict):
                 camera_config = requested_camera_config
+                retargeter.reset_smoothing()
                 engaged_event.clear()
                 gate_state = gate.reset()
             if tracking_reset_event.is_set():
                 tracking_reset_event.clear()
+                retargeter.reset_smoothing()
                 engaged_event.clear()
                 gate_state = gate.reset()
             incoming = drain_latest(frame_queue)
@@ -363,6 +368,17 @@ def perception_worker(
                     "confidence_required_seconds": gate_state.required_seconds,
                     "minimum_confidence": round(minimum_confidence, 3),
                     "mean_confidence": round(mean_confidence, 3),
+                    "smoothed_end_effectors": (
+                        {
+                            side: list(
+                                getattr(target, side).wrist_position_m
+                            )
+                            for side in ("left", "right")
+                            if getattr(target, side).wrist_position_m is not None
+                        }
+                        if error is None
+                        else None
+                    ),
                     "error": error,
                 },
             )

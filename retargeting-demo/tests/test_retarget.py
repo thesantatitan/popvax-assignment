@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from retargeting_demo.retarget import (
     BODY,
@@ -6,6 +7,7 @@ from retargeting_demo.retarget import (
     FOREARM_LENGTH_M,
     UPPER_ARM_LENGTH_M,
     SimccRetargeter,
+    exponential_smoothing_alpha,
     required_keypoint_indices,
     simcc_to_camera_points,
     target_record,
@@ -39,6 +41,70 @@ def synthetic_pose() -> tuple[np.ndarray, np.ndarray]:
 def test_camera_mapping_is_a_rotation() -> None:
     np.testing.assert_allclose(CAMERA_TO_ROBOT.T @ CAMERA_TO_ROBOT, np.eye(3))
     assert np.linalg.det(CAMERA_TO_ROBOT) == 1.0
+
+
+def test_pose_smoothing_is_rate_independent() -> None:
+    alpha_10hz = exponential_smoothing_alpha(1.0 / 10.0, 0.12)
+    alpha_20hz = exponential_smoothing_alpha(1.0 / 20.0, 0.12)
+
+    remaining_10hz = (1.0 - alpha_10hz) ** 10
+    remaining_20hz = (1.0 - alpha_20hz) ** 20
+    assert remaining_10hz == pytest.approx(remaining_20hz)
+    assert remaining_10hz == pytest.approx(np.exp(-1.0 / 0.12))
+
+
+def test_zero_time_constant_disables_pose_smoothing() -> None:
+    assert exponential_smoothing_alpha(1.0 / 20.0, 0.0) == 1.0
+
+
+def test_retargeter_smooths_pose_and_reset_forgets_history() -> None:
+    first_pose, scores = synthetic_pose()
+    second_pose = first_pose.copy()
+    second_pose[0, BODY["left"]["wrist"]] += np.array([45.0, -35.0, 20.0])
+    filtered = SimccRetargeter(smoothing_time_constant_s=0.12)
+    unfiltered = SimccRetargeter(smoothing_time_constant_s=0.0)
+    for retargeter in (filtered, unfiltered):
+        retargeter.make_target(
+            sequence=1,
+            capture_time_ns=0,
+            inference_time_ns=1_000_000_000,
+            simcc=first_pose,
+            scores=scores,
+            mode="both",
+        )
+
+    filtered_target = filtered.make_target(
+        sequence=2,
+        capture_time_ns=0,
+        inference_time_ns=1_050_000_000,
+        simcc=second_pose,
+        scores=scores,
+        mode="both",
+    )
+    unfiltered_target = unfiltered.make_target(
+        sequence=2,
+        capture_time_ns=0,
+        inference_time_ns=1_050_000_000,
+        simcc=second_pose,
+        scores=scores,
+        mode="both",
+    )
+
+    assert filtered_target.left.wrist_position_m != pytest.approx(
+        unfiltered_target.left.wrist_position_m
+    )
+    filtered.reset_smoothing()
+    reset_target = filtered.make_target(
+        sequence=3,
+        capture_time_ns=0,
+        inference_time_ns=2_000_000_000,
+        simcc=second_pose,
+        scores=scores,
+        mode="both",
+    )
+    assert reset_target.left.wrist_position_m == pytest.approx(
+        unfiltered_target.left.wrist_position_m
+    )
 
 
 def test_retargeting_has_robot_segment_lengths() -> None:
